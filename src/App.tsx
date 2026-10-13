@@ -21,6 +21,12 @@ const MainApplication: React.FC = () => {
   const { isAuthenticated, isLoading, hasAnyPermission, user } = useAuth();
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
   const [isSetupAdminOpen, setIsSetupAdminOpen] = useState<boolean>(false);
+  const [openRegisterMemberModal, setOpenRegisterMemberModal] = useState<boolean>(false);
+
+  const handleAddNewMember = () => {
+    setCurrentTab('members');
+    setOpenRegisterMemberModal(true);
+  };
 
   // Validate active tab access against user permissions, reset to dashboard if unauthorized or logged out
   useEffect(() => {
@@ -75,9 +81,14 @@ const MainApplication: React.FC = () => {
   const renderActiveView = () => {
     switch (currentTab) {
       case 'dashboard':
-        return <DashboardView onNavigate={(tab) => setCurrentTab(tab)} />;
+        return <DashboardView onNavigate={(tab) => setCurrentTab(tab)} onAddNewMember={handleAddNewMember} />;
       case 'members':
-        return <MembersView />;
+        return (
+          <MembersView
+            initialOpenRegisterModal={openRegisterMemberModal}
+            onRegisterModalClosed={() => setOpenRegisterMemberModal(false)}
+          />
+        );
       case 'turihamwe':
         return <TurihamweView />;
       case 'transactions':
@@ -94,12 +105,12 @@ const MainApplication: React.FC = () => {
       case 'audit-logs':
         return <SystemView />;
       default:
-        return <DashboardView onNavigate={(tab) => setCurrentTab(tab)} />;
+        return <DashboardView onNavigate={(tab) => setCurrentTab(tab)} onAddNewMember={handleAddNewMember} />;
     }
   };
 
   return (
-    <AppLayout currentTab={currentTab} onSelectTab={setCurrentTab}>
+    <AppLayout currentTab={currentTab} onSelectTab={setCurrentTab} onAddNewMember={handleAddNewMember}>
       {renderActiveView()}
     </AppLayout>
   );

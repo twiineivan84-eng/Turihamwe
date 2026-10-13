@@ -132,11 +132,14 @@ async function bootstrap() {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });
   } else {
+    const isHmrDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
         host: '0.0.0.0',
         port: PORT,
+        hmr: isHmrDisabled ? false : undefined,
+        ws: (isHmrDisabled ? false : undefined) as false | undefined,
       },
       appType: 'spa',
     });

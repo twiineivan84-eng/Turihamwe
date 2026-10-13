@@ -185,6 +185,25 @@ export async function runRecordPropagationTests() {
   await (async () => {
     const ts = Date.now();
     const acc = `ACC-CALC-${ts}`;
+    serverStore.addMember({
+      saccoAccountNumber: acc,
+      fullName: 'Calculation Test',
+      gender: 'MALE',
+      dateOfBirth: '1990-01-01',
+      nationalIdNumber: `CM90CALC${ts.toString().slice(-4)}`,
+      primaryPhone: '+256701000111',
+      district: 'Isingiro',
+      subCounty: 'Nyamuyanja',
+      parish: 'Central',
+      village: 'Trading Centre',
+      registrationDate: '2026-01-01',
+      branchId: 'branch-nya',
+      branchName: 'Nyamuyanja Branch',
+      turihamweStatus: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isDeleted: false,
+    });
     const plan: TurihamwePlan = {
       id: `plan-calc-${ts}`,
       planCode: `PLN-CALC-${ts}`,

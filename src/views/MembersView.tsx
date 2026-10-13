@@ -36,7 +36,15 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
-export const MembersView: React.FC = () => {
+interface MembersViewProps {
+  initialOpenRegisterModal?: boolean;
+  onRegisterModalClosed?: () => void;
+}
+
+export const MembersView: React.FC<MembersViewProps> = ({
+  initialOpenRegisterModal,
+  onRegisterModalClosed,
+}) => {
   const { user, workingBranch, hasPermission } = useAuth();
   const { isOnline } = useSync();
 
@@ -148,6 +156,31 @@ export const MembersView: React.FC = () => {
   useEffect(() => {
     loadMembers();
   }, [workingBranch, isOnline]);
+
+  // Handle external trigger to open register member modal
+  useEffect(() => {
+    if (initialOpenRegisterModal && canRegister) {
+      setFormData({
+        saccoAccountNumber: '',
+        fullName: '',
+        gender: 'MALE',
+        dateOfBirth: '',
+        nationalIdNumber: '',
+        primaryPhone: '',
+        alternativePhone: '',
+        emailAddress: '',
+        district: 'Isingiro',
+        subCounty: 'Nyamuyanja',
+        parish: '',
+        village: '',
+        branchId: workingBranch?.id || '',
+        registrationDate: new Date().toISOString().split('T')[0],
+      });
+      setFormErrors({});
+      setShowRegisterModal(true);
+      onRegisterModalClosed?.();
+    }
+  }, [initialOpenRegisterModal, canRegister, workingBranch?.id, onRegisterModalClosed]);
 
   // Load member details, audit history, plan, beneficiaries, contributions, and renewals when viewing profile
   const loadMemberHistory = useCallback(async (targetMember?: SaccoMember) => {

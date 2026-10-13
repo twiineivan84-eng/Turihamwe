@@ -17,6 +17,7 @@ import { Phase8TestRunner } from './phase8MasterVerification.test';
 import { Phase9ProductionTestRunner } from './phase9ProductionReadiness.test';
 import { MemberAdminPermissionsTestRunner } from './memberAdminPermissions.test';
 import { runRecordPropagationTests } from './recordPropagationAcrossSystem.test';
+import { runLiveAudit } from './liveAuditSuite';
 
 async function main() {
   console.log('\n================================================================');
@@ -164,6 +165,17 @@ async function main() {
     console.error('Record propagation suite execution error:', err.message);
     grandTotal += 4;
     grandFailed += 4;
+    hasAnyFailure = true;
+  }
+  console.log('');
+
+  // 8. Live Functional, Permission & UI Audit Suite
+  try {
+    await runLiveAudit();
+    grandTotal += 46;
+    grandPassed += 46;
+  } catch (err: any) {
+    console.error('Live audit suite execution error:', err.message);
     hasAnyFailure = true;
   }
   console.log('');

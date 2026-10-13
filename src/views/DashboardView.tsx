@@ -19,16 +19,18 @@ import {
   Send,
   BarChart3,
   AlertTriangle,
-  MessageSquare
+  MessageSquare,
+  UserPlus
 } from 'lucide-react';
 import { NavigationTab } from '../components/layout/Sidebar';
 import { SystemAlert, MonthlyBranchSummary } from '../types';
 
 interface DashboardViewProps {
   onNavigate: (tab: NavigationTab) => void;
+  onAddNewMember?: () => void;
 }
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
+export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onAddNewMember }) => {
   const { user, workingBranch, hasPermission } = useAuth();
   const { syncState, pendingCount, lastSyncedAt, triggerSync } = useSync();
 
@@ -43,7 +45,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [summary, setSummary] = useState<MonthlyBranchSummary | null>(null);
   const [alerts, setAlerts] = useState<SystemAlert[]>([]);
   const [failedSmsCount, setFailedSmsCount] = useState<number>(0);
-  const [membersCount, setMembersCount] = useState<number>(1248);
+  const [membersCount, setMembersCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const loadDashboardData = useCallback(async () => {
@@ -189,10 +191,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               </div>
             </div>
             <div className="text-2xl font-bold text-slate-900">
-              {summary ? summary.activePlans : 894}
+              {summary ? summary.activePlans : (isLoading ? '...' : 0)}
             </div>
             <div className="mt-2 flex items-center text-xs text-slate-500 font-medium">
-              <span>{summary ? `${summary.newRegistrations} registered this month` : '71.6% SACCO penetration'}</span>
+              <span>{summary ? `${summary.newRegistrations} registered this month` : 'Active SACCO scheme plans'}</span>
             </div>
           </div>
         ) : null}
@@ -210,7 +212,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               </div>
             </div>
             <div className="text-2xl font-bold text-slate-900">
-              {summary ? summary.renewalsCompleted : 42}
+              {summary ? summary.renewalsCompleted : (isLoading ? '...' : 0)}
             </div>
             <div className="mt-2 flex items-center text-xs text-amber-700 font-medium">
               <span>Policy retention cycle active</span>
@@ -231,10 +233,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               </div>
             </div>
             <div className="text-2xl font-bold text-slate-900">
-              {summary ? summary.claimsSubmitted - summary.claimsSettled : 3}
+              {summary ? Math.max(0, summary.claimsSubmitted - summary.claimsSettled) : (isLoading ? '...' : 0)}
             </div>
             <div className="mt-2 flex items-center text-xs text-purple-700 font-medium">
-              <span>{summary ? `${summary.claimsApproved} approved for settlement` : '2 awaiting review'}</span>
+              <span>{summary ? `${summary.claimsApproved} approved for settlement` : 'Awaiting administrative review'}</span>
             </div>
           </div>
         ) : null}
@@ -252,7 +254,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               </div>
             </div>
             <div className="text-2xl font-bold text-blue-950">
-              UGX {Number(summary?.financials?.totalContributionsUGX || 14850000).toLocaleString()}
+              UGX {Number(summary?.financials?.totalContributionsUGX || 0).toLocaleString()}
             </div>
             <div className="mt-2 flex items-center text-xs text-blue-800 font-medium">
               <span>Controlled financial aggregate</span>
@@ -398,6 +400,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               Authorized Quick Actions
             </h2>
             <div className="space-y-2">
+              {hasPermission('members.register') && (
+                <button
+                  onClick={() => (onAddNewMember ? onAddNewMember() : onNavigate('members'))}
+                  className="w-full text-left px-3 py-2.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-xs font-semibold text-blue-900 flex items-center justify-between transition border border-blue-200 cursor-pointer shadow-xs"
+                >
+                  <span className="flex items-center gap-2">
+                    <UserPlus className="w-4 h-4 text-blue-700" />
+                    Add New SACCO Member
+                  </span>
+                  <ArrowUpRight className="w-4 h-4 text-blue-700" />
+                </button>
+              )}
+
               {canViewReports && (
                 <button
                   onClick={() => onNavigate('reports')}

@@ -107,7 +107,7 @@ export class SmsService {
       newValue: JSON.stringify({
         recipient: formattedPhone,
         eventKey: params.eventReferenceKey,
-        length: params.messageText.length,
+        length: (params.messageText || '').length,
       }),
       reason: 'Outbound SMS notification queued in system pipeline',
     });

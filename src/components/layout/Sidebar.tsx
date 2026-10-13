@@ -12,7 +12,8 @@ import {
   Settings2,
   Building,
   ScrollText,
-  MessageSquare
+  MessageSquare,
+  UserPlus
 } from 'lucide-react';
 
 export type NavigationTab =
@@ -149,10 +150,11 @@ const NAV_ITEMS: NavItem[] = [
 interface SidebarProps {
   currentTab: NavigationTab;
   onSelectTab: (tab: NavigationTab) => void;
+  onAddNewMember?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => {
-  const { hasAnyPermission, user, workingBranch } = useAuth();
+export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onAddNewMember }) => {
+  const { hasAnyPermission, hasPermission, user, workingBranch } = useAuth();
 
   // Filter items strictly by permission: HIDE ENTIRE SECTION IF UNAUTHORIZED
   const visibleNavItems = NAV_ITEMS.filter(item => {
@@ -192,7 +194,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
             <button
               key={item.id}
               onClick={() => onSelectTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
                 isActive
                   ? 'bg-blue-50 text-blue-700 font-semibold border-l-4 border-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
@@ -203,6 +205,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
             </button>
           );
         })}
+
+        {/* Action Button: Add New Member under the modules */}
+        {hasPermission('members.register') && (
+          <div className="pt-3 mt-3 border-t border-slate-200/80">
+            <button
+              onClick={() => (onAddNewMember ? onAddNewMember() : onSelectTab('members'))}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold shadow-xs hover:shadow-sm active:scale-[0.99] transition-all cursor-pointer"
+              title="Register a new member to Nyamuyanja SACCO"
+            >
+              <UserPlus className="w-4 h-4 shrink-0 text-white" />
+              <span>Add New Member</span>
+            </button>
+          </div>
+        )}
       </nav>
 
       {/* Institutional Security Notice */}

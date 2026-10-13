@@ -257,6 +257,20 @@ class ServerStore {
       }
     }
 
+    // Ensure strict SACCO account number uniqueness across members
+    const seenAccs = new Set<string>();
+    this.state.members = this.state.members.filter(m => {
+      const acc = m.saccoAccountNumber.toUpperCase();
+      if (seenAccs.has(acc)) return false;
+      seenAccs.add(acc);
+      return true;
+    });
+
+    // Ensure referential integrity: Plans must belong to an existing SACCO member
+    this.state.plans = this.state.plans.filter(p =>
+      this.state.members.some(m => m.saccoAccountNumber.toUpperCase() === p.saccoAccountNumber.toUpperCase())
+    );
+
     // Ensure 6 branches exist
     if (this.state.branches.length === 0) {
       this.state.branches = [...INITIAL_BRANCHES];
@@ -322,115 +336,113 @@ class ServerStore {
   }
 
   private seedDefaultDataIfEmpty(): void {
+    const hq = this.state.branches[0];
+    const kagarama = this.state.branches[1];
+    const masha = this.state.branches[5] || hq;
+
+    const seedMembers: SaccoMember[] = [
+      {
+        saccoAccountNumber: 'NYA-001042',
+        fullName: 'Kato Emmanuel',
+        gender: 'MALE',
+        dateOfBirth: '1985-04-12',
+        nationalIdNumber: 'CM85012345XYZ',
+        primaryPhone: '+256772112233',
+        alternativePhone: '+256750998877',
+        emailAddress: 'kato.emmanuel@gmail.com',
+        district: 'Isingiro',
+        subCounty: 'Nyamuyanja',
+        parish: 'Kashojwa',
+        village: 'Kashojwa Central',
+        registrationDate: '2026-01-15',
+        branchId: hq.id,
+        branchName: hq.name,
+        turihamweStatus: 'ACTIVE',
+        createdAt: '2026-01-15T08:30:00.000Z',
+        updatedAt: '2026-01-15T08:30:00.000Z',
+      },
+      {
+        saccoAccountNumber: 'NYA-002109',
+        fullName: 'Mukasa Ronald',
+        gender: 'MALE',
+        dateOfBirth: '1979-09-22',
+        nationalIdNumber: 'CM79023456ABC',
+        primaryPhone: '+256782334455',
+        district: 'Isingiro',
+        subCounty: 'Nyamuyanja',
+        parish: 'Rukoni',
+        village: 'Rukoni East',
+        registrationDate: '2025-10-08',
+        branchId: hq.id,
+        branchName: hq.name,
+        turihamweStatus: 'ACTIVE',
+        createdAt: '2025-10-08T09:15:00.000Z',
+        updatedAt: '2025-10-08T09:15:00.000Z',
+      },
+      {
+        saccoAccountNumber: 'KAG-000412',
+        fullName: 'Baguma Rogers',
+        gender: 'MALE',
+        dateOfBirth: '1982-12-05',
+        nationalIdNumber: 'CM82034567DEF',
+        primaryPhone: '+256701445566',
+        district: 'Isingiro',
+        subCounty: 'Kagarama',
+        parish: 'Kagarama East',
+        village: 'Kagarama Central',
+        registrationDate: '2025-09-01',
+        branchId: kagarama.id,
+        branchName: kagarama.name,
+        turihamweStatus: 'EXPIRED',
+        createdAt: '2025-09-01T10:00:00.000Z',
+        updatedAt: '2025-09-01T10:00:00.000Z',
+      },
+      {
+        saccoAccountNumber: 'MSH-000305',
+        fullName: 'Natukunda Patience',
+        gender: 'FEMALE',
+        dateOfBirth: '1992-06-18',
+        nationalIdNumber: 'CF92045678GHI',
+        primaryPhone: '+256755778899',
+        district: 'Isingiro',
+        subCounty: 'Masha',
+        parish: 'Masha North',
+        village: 'Masha Trading Centre',
+        registrationDate: '2026-03-10',
+        branchId: masha.id,
+        branchName: masha.name,
+        turihamweStatus: 'ACTIVE',
+        createdAt: '2026-03-10T11:20:00.000Z',
+        updatedAt: '2026-03-10T11:20:00.000Z',
+      },
+      {
+        saccoAccountNumber: 'NYA-000819',
+        fullName: 'Mugisha Denis',
+        gender: 'MALE',
+        dateOfBirth: '1990-11-20',
+        nationalIdNumber: 'CM90098765ABC',
+        primaryPhone: '+256701889900',
+        alternativePhone: '+256773445566',
+        emailAddress: 'denis.mugisha@gmail.com',
+        district: 'Isingiro',
+        subCounty: 'Nyamuyanja',
+        parish: 'Rukoni',
+        village: 'Rukoni West',
+        registrationDate: '2025-11-01',
+        branchId: hq.id,
+        branchName: hq.name,
+        turihamweStatus: 'ACTIVE',
+        createdAt: '2025-11-01T09:00:00.000Z',
+        updatedAt: '2025-11-01T09:00:00.000Z',
+      },
+    ];
+
     if (this.state.members.length === 0) {
-      const hq = this.state.branches[0];
-      const kagarama = this.state.branches[1];
-      const masha = this.state.branches[5] || hq;
-
-      const seedMembers: SaccoMember[] = [
-        {
-          saccoAccountNumber: 'NYA-001042',
-          fullName: 'Kato Emmanuel',
-          gender: 'MALE',
-          dateOfBirth: '1985-04-12',
-          nationalIdNumber: 'CM85012345XYZ',
-          primaryPhone: '+256772112233',
-          alternativePhone: '+256750998877',
-          emailAddress: 'kato.emmanuel@gmail.com',
-          district: 'Isingiro',
-          subCounty: 'Nyamuyanja',
-          parish: 'Kashojwa',
-          village: 'Kashojwa Central',
-          registrationDate: '2026-01-15',
-          branchId: hq.id,
-          branchName: hq.name,
-          turihamweStatus: 'ACTIVE',
-          createdAt: '2026-01-15T08:30:00.000Z',
-          updatedAt: '2026-01-15T08:30:00.000Z',
-        },
-        {
-          saccoAccountNumber: 'NYA-002109',
-          fullName: 'Mukasa Ronald',
-          gender: 'MALE',
-          dateOfBirth: '1979-09-22',
-          nationalIdNumber: 'CM79023456ABC',
-          primaryPhone: '+256782334455',
-          district: 'Isingiro',
-          subCounty: 'Nyamuyanja',
-          parish: 'Rukoni',
-          village: 'Rukoni East',
-          registrationDate: '2025-10-08',
-          branchId: hq.id,
-          branchName: hq.name,
-          turihamweStatus: 'ACTIVE',
-          createdAt: '2025-10-08T09:15:00.000Z',
-          updatedAt: '2025-10-08T09:15:00.000Z',
-        },
-        {
-          saccoAccountNumber: 'KAG-000412',
-          fullName: 'Baguma Rogers',
-          gender: 'MALE',
-          dateOfBirth: '1982-12-05',
-          nationalIdNumber: 'CM82034567DEF',
-          primaryPhone: '+256701445566',
-          district: 'Isingiro',
-          subCounty: 'Kagarama',
-          parish: 'Kagarama East',
-          village: 'Kagarama Central',
-          registrationDate: '2025-09-01',
-          branchId: kagarama.id,
-          branchName: kagarama.name,
-          turihamweStatus: 'EXPIRED',
-          createdAt: '2025-09-01T10:00:00.000Z',
-          updatedAt: '2025-09-01T10:00:00.000Z',
-        },
-        {
-          saccoAccountNumber: 'MSH-000305',
-          fullName: 'Natukunda Patience',
-          gender: 'FEMALE',
-          dateOfBirth: '1992-06-18',
-          nationalIdNumber: 'CF92045678GHI',
-          primaryPhone: '+256755778899',
-          district: 'Isingiro',
-          subCounty: 'Masha',
-          parish: 'Masha North',
-          village: 'Masha Trading Centre',
-          registrationDate: '2026-03-10',
-          branchId: masha.id,
-          branchName: masha.name,
-          turihamweStatus: 'ACTIVE',
-          createdAt: '2026-03-10T11:20:00.000Z',
-          updatedAt: '2026-03-10T11:20:00.000Z',
-        },
-        {
-          saccoAccountNumber: 'NYA-000819',
-          fullName: 'Mugisha Denis',
-          gender: 'MALE',
-          dateOfBirth: '1990-11-20',
-          nationalIdNumber: 'CM90098765ABC',
-          primaryPhone: '+256701889900',
-          alternativePhone: '+256773445566',
-          emailAddress: 'denis.mugisha@gmail.com',
-          district: 'Isingiro',
-          subCounty: 'Nyamuyanja',
-          parish: 'Rukoni',
-          village: 'Rukoni West',
-          registrationDate: '2025-11-01',
-          branchId: hq.id,
-          branchName: hq.name,
-          turihamweStatus: 'ACTIVE',
-          createdAt: '2025-11-01T09:00:00.000Z',
-          updatedAt: '2025-11-01T09:00:00.000Z',
-        },
-      ];
-
-      if (this.state.members.length === 0) {
-        this.state.members = seedMembers;
-      } else {
-        for (const sm of seedMembers) {
-          if (!this.state.members.some(m => m.saccoAccountNumber.toUpperCase() === sm.saccoAccountNumber.toUpperCase())) {
-            this.state.members.push(sm);
-          }
+      this.state.members = seedMembers;
+    } else {
+      for (const sm of seedMembers) {
+        if (!this.state.members.some(m => m.saccoAccountNumber.toUpperCase() === sm.saccoAccountNumber.toUpperCase())) {
+          this.state.members.push(sm);
         }
       }
     }
@@ -776,6 +788,9 @@ class ServerStore {
   }
 
   public addMember(member: SaccoMember): void {
+    if (this.getMemberByAccountNumber(member.saccoAccountNumber)) {
+      throw new Error(`Member with SACCO account number '${member.saccoAccountNumber}' already exists.`);
+    }
     this.state.members.unshift(member);
     this.save();
   }
