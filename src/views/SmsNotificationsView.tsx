@@ -8,7 +8,8 @@ import {
   SmsStatus,
   SmsTemplateCategory,
   Branch,
-  SaccoMember
+  SaccoMember,
+  SmsProviderDiagnostics
 } from '../types';
 import {
   MessageSquare,
@@ -31,7 +32,16 @@ import {
   Eye,
   Sliders,
   X,
-  Smartphone
+  Smartphone,
+  Activity,
+  Wifi,
+  WifiOff,
+  Check,
+  Play,
+  Pause,
+  FlaskConical,
+  Server,
+  Radio
 } from 'lucide-react';
 
 export const SmsNotificationsView: React.FC = () => {
@@ -71,6 +81,20 @@ export const SmsNotificationsView: React.FC = () => {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [statusFeedback, setStatusFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // Provider Diagnostics & Test State
+  const [diagnostics, setDiagnostics] = useState<SmsProviderDiagnostics | null>(null);
+  const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState<boolean>(false);
+  const [isConnectionTesting, setIsConnectionTesting] = useState<boolean>(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{
+    connected: boolean;
+    balanceUGX?: string | null;
+    message: string;
+    checkedAt: string;
+  } | null>(null);
+  const [isTestSendModalOpen, setIsTestSendModalOpen] = useState<boolean>(false);
+  const [testSendPhone, setTestSendPhone] = useState<string>('+256701234567');
+  const [isTestSending, setIsTestSending] = useState<boolean>(false);
+
   // Manual Compose State
   const [membersList, setMembersList] = useState<SaccoMember[]>([]);
   const [composeMemberAccount, setComposeMemberAccount] = useState<string>('');
@@ -91,7 +115,103 @@ export const SmsNotificationsView: React.FC = () => {
     } else if (workingBranch) {
       setBranchFilter(workingBranch.id);
     }
+    fetchDiagnostics();
   }, [user, workingBranch]);
+
+  // Load Diagnostics
+  const fetchDiagnostics = async () => {
+    setIsLoadingDiagnostics(true);
+    try {
+      const res = await apiClient.getSmsDiagnostics();
+      if (res.success) {
+        setDiagnostics(res.data);
+      }
+    } catch (err: any) {
+      if (!err?.message?.includes('Session expired') && !err?.message?.includes('401')) {
+        console.warn('Failed to load SMS provider diagnostics:', err);
+      }
+    } finally {
+      setIsLoadingDiagnostics(false);
+    }
+  };
+
+  // Safe Connection Test (No SMS Sent)
+  const handleTestConnection = async () => {
+    setIsConnectionTesting(true);
+    setConnectionTestResult(null);
+    try {
+      const res = await apiClient.testSmsConnection();
+      setConnectionTestResult({
+        connected: res.success,
+        balanceUGX: res.data?.balanceUGX,
+        message: res.message || (res.success ? 'Successfully verified credentials with provider' : 'Connection verification failed'),
+        checkedAt: new Date().toLocaleTimeString(),
+      });
+      fetchDiagnostics();
+    } catch (err: any) {
+      setConnectionTestResult({
+        connected: false,
+        message: err.message || 'Connection test failed',
+        checkedAt: new Date().toLocaleTimeString(),
+      });
+    } finally {
+      setIsConnectionTesting(false);
+    }
+  };
+
+  // Explicit Admin Test Message
+  const handleAdminTestSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testSendPhone) return;
+    setIsTestSending(true);
+    try {
+      const res = await apiClient.testSmsSend({
+        recipientPhone: testSendPhone,
+        confirmSandboxTest: true,
+      });
+      if (res.success) {
+        setStatusFeedback({
+          type: 'success',
+          message: res.message || 'Test SMS dispatched successfully via Africa\'s Talking.',
+        });
+        setIsTestSendModalOpen(false);
+        fetchQueue();
+        fetchDiagnostics();
+      } else {
+        setStatusFeedback({
+          type: 'error',
+          message: res.error || 'Test SMS dispatch rejected.',
+        });
+      }
+    } catch (err: any) {
+      setStatusFeedback({
+        type: 'error',
+        message: err.message || 'Test SMS dispatch failed.',
+      });
+    } finally {
+      setIsTestSending(false);
+    }
+  };
+
+  // Worker Start/Stop Toggle
+  const handleToggleWorker = async () => {
+    if (!diagnostics) return;
+    setActionLoadingId('worker-toggle');
+    try {
+      if (diagnostics.workerStatus === 'RUNNING') {
+        const res = await apiClient.stopSmsWorker();
+        setStatusFeedback({ type: 'success', message: res.message });
+      } else {
+        const res = await apiClient.startSmsWorker();
+        setStatusFeedback({ type: 'success', message: res.message });
+      }
+      fetchDiagnostics();
+    } catch (err: any) {
+      setStatusFeedback({ type: 'error', message: err.message || 'Failed to toggle SMS Queue Worker' });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   // Load Queue
   const fetchQueue = async () => {
@@ -152,7 +272,10 @@ export const SmsNotificationsView: React.FC = () => {
   };
 
   useEffect(() => {
-    if (activeTab === 'queue') fetchQueue();
+    if (activeTab === 'queue') {
+      fetchQueue();
+      fetchDiagnostics();
+    }
     if (activeTab === 'templates') fetchTemplates();
     if (activeTab === 'events') fetchEvents();
   }, [activeTab, branchFilter, statusFilter]);
@@ -329,36 +452,68 @@ export const SmsNotificationsView: React.FC = () => {
     }
   };
 
-  // Render Status Badge
-  const renderStatusBadge = (status: SmsStatus) => {
-    switch (status) {
+  // Render Status Badge distinguishing submission from delivery
+  const renderStatusBadge = (msg: SmsMessage) => {
+    switch (msg.status) {
       case 'SENT':
+        if (msg.deliveryConfirmed) {
+          return (
+            <div>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                DELIVERED
+              </span>
+              <span className="text-[9px] text-emerald-700 block mt-0.5 font-medium">Handset Confirmed</span>
+            </div>
+          );
+        }
+        if (diagnostics?.environment === 'SANDBOX' || msg.deliveryStatus === 'SimulatedSandbox') {
+          return (
+            <div>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 flex items-center gap-1">
+                <Radio className="w-3 h-3 text-indigo-600" />
+                SIMULATED
+              </span>
+              <span className="text-[9px] text-indigo-700 block mt-0.5 font-medium">Sandbox Simulator</span>
+            </div>
+          );
+        }
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-            SENT
-          </span>
+          <div>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1">
+              <Send className="w-3 h-3 text-blue-600" />
+              SUBMITTED
+            </span>
+            <span className="text-[9px] text-blue-700 block mt-0.5 font-medium">Awaiting Telco DLR</span>
+          </div>
         );
       case 'PENDING':
         return (
           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
             <Clock className="w-3 h-3 text-amber-600" />
-            PENDING
+            QUEUED
           </span>
         );
       case 'SENDING':
         return (
           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1">
             <RefreshCw className="w-3 h-3 text-blue-600 animate-spin" />
-            SENDING
+            PROCESSING
           </span>
         );
       case 'FAILED':
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1">
-            <AlertCircle className="w-3 h-3 text-rose-600" />
-            FAILED
-          </span>
+          <div>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3 text-rose-600" />
+              FAILED
+            </span>
+            {msg.failureReason && (
+              <span className="text-[9px] text-rose-600 block mt-0.5 max-w-[120px] truncate" title={msg.failureReason}>
+                {msg.failureReason}
+              </span>
+            )}
+          </div>
         );
     }
   };
@@ -420,39 +575,273 @@ export const SmsNotificationsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Gateway Security & Provider Banner */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <Smartphone className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="font-bold text-slate-800 flex items-center gap-2">
-              <span>Provider: Africa&apos;s Talking (Uganda SMS API)</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                GATEWAY CONNECTED
-              </span>
+      {/* Africa's Talking Provider Status & Diagnostics Panel */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
+        {/* Main Provider Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className={`p-2.5 rounded-xl border ${
+              diagnostics?.configurationStatus === 'CONFIGURED'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-amber-50 text-amber-700 border-amber-200'
+            }`}>
+              <Smartphone className="w-5 h-5" />
             </div>
-            <p className="text-slate-500 mt-0.5">
-              Protocol: REST / HTTPS • API Credentials Secured in Server-Side Environment (Zero Client Leakage)
-            </p>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-slate-900 text-sm">Provider: Africa&apos;s Talking (Uganda SMS Gateway)</span>
+                
+                {/* Configuration Status Badge */}
+                {diagnostics?.configurationStatus === 'CONFIGURED' ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    CONFIGURED
+                  </span>
+                ) : diagnostics?.configurationStatus === 'DISABLED' ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300">
+                    DISABLED
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 text-amber-600" />
+                    NOT CONFIGURED
+                  </span>
+                )}
+
+                {/* Environment Badge */}
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                  diagnostics?.environment === 'PRODUCTION'
+                    ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                    : 'bg-blue-100 text-blue-800 border border-blue-200'
+                }`}>
+                  {diagnostics?.environment || 'SANDBOX'} MODE
+                </span>
+
+                {/* Worker Status Badge */}
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1.5 ${
+                  diagnostics?.workerStatus === 'RUNNING'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-slate-100 text-slate-600 border border-slate-200'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${
+                    diagnostics?.workerStatus === 'RUNNING' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                  }`} />
+                  Worker: {diagnostics?.workerStatus || 'STOPPED'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Direct telecommunications dispatch via official Africa&apos;s Talking REST API • Uganda E.164 (+256) formatting
+              </p>
+            </div>
+          </div>
+
+          {/* Diagnostics Actions */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleTestConnection}
+              disabled={isConnectionTesting}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold border border-slate-300 transition disabled:opacity-50"
+              title="Verify credentials with Africa's Talking balance API without sending any SMS"
+            >
+              <Wifi className={`w-3.5 h-3.5 ${isConnectionTesting ? 'animate-spin text-blue-600' : 'text-slate-600'}`} />
+              <span>{isConnectionTesting ? 'Verifying...' : 'Test Connection (Safe)'}</span>
+            </button>
+
+            {canSendSms && (
+              <button
+                onClick={() => setIsTestSendModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-semibold border border-blue-200 transition"
+                title="Send a clearly labelled administrative test SMS to verify end-to-end delivery"
+              >
+                <FlaskConical className="w-3.5 h-3.5 text-blue-600" />
+                <span>Admin Test SMS</span>
+              </button>
+            )}
+
+            {hasPermission('admin.system_settings') && (
+              <button
+                onClick={handleToggleWorker}
+                disabled={actionLoadingId === 'worker-toggle'}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200 transition"
+                title="Start or pause background queue worker"
+              >
+                {diagnostics?.workerStatus === 'RUNNING' ? (
+                  <>
+                    <Pause className="w-3 h-3 text-amber-600" />
+                    <span>Pause Worker</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3 h-3 text-emerald-600" />
+                    <span>Start Worker</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            <button
+              onClick={fetchDiagnostics}
+              disabled={isLoadingDiagnostics}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+              title="Refresh provider status"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDiagnostics ? 'animate-spin' : ''}`} />
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 text-slate-600 bg-slate-50 px-4 py-2 rounded-lg border border-slate-200 text-[11px]">
-          <div>
-            <span className="text-slate-400 block text-[9px] uppercase font-bold">Sender ID / Code</span>
-            <span className="font-semibold font-mono text-slate-800">NYAMUYANJA</span>
+        {/* Warning Banner: When Provider Submission is NOT configured */}
+        {diagnostics && diagnostics.configurationStatus !== 'CONFIGURED' && (
+          <div className="p-4 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 text-xs space-y-2">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-bold text-amber-950">
+                  Africa&apos;s Talking submission is not configured on this deployment, so queued messages stay in the queue and are never marked as sent. Provider credentials are held only by the secure backend service, never by this interface.
+                </div>
+                <p className="text-amber-800 leading-relaxed text-[11px]">
+                  <strong>Current Status:</strong> {diagnostics.configurationMessage}
+                </p>
+                <div className="pt-1 text-[11px] text-amber-800/90 flex flex-wrap gap-x-4 gap-y-1">
+                  <span>• <strong>Development environment:</strong> Operates under Africa&apos;s Talking Sandbox.</span>
+                  <span>• <strong>Production environment:</strong> Requires Africa&apos;s Talking Uganda SMS API credentials.</span>
+                  <span>• <strong>Required backend variables:</strong> <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">AT_USERNAME</code>, <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">AT_API_KEY</code>, <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">AT_SENDER_ID</code>.</span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="h-6 w-px bg-slate-200" />
-          <div>
-            <span className="text-slate-400 block text-[9px] uppercase font-bold">Environment</span>
-            <span className="font-semibold text-blue-700">Sandbox / Live Uganda</span>
+        )}
+
+        {/* Connection Test Result Feedback */}
+        {connectionTestResult && (
+          <div className={`p-3 rounded-lg border text-xs flex items-center justify-between ${
+            connectionTestResult.connected
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-rose-50 border-rose-200 text-rose-900'
+          }`}>
+            <div className="flex items-center gap-2">
+              {connectionTestResult.connected ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              )}
+              <span>
+                <strong>Connection Test ({connectionTestResult.checkedAt}):</strong> {connectionTestResult.message}
+              </span>
+            </div>
+            <button
+              onClick={() => setConnectionTestResult(null)}
+              className="text-slate-400 hover:text-slate-600 p-1"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
-          <div className="h-6 w-px bg-slate-200" />
-          <div>
-            <span className="text-slate-400 block text-[9px] uppercase font-bold">Offline Queue</span>
-            <span className="font-semibold text-emerald-700">Dexie IndexedDB Sync Enabled</span>
+        )}
+
+        {/* Notice Banner: Sandbox Mode Explanation */}
+        {diagnostics?.environment === 'SANDBOX' && diagnostics.configurationStatus === 'CONFIGURED' && (
+          <div className="p-3.5 rounded-xl bg-blue-50/90 border border-blue-200 text-blue-900 text-xs flex items-start gap-3">
+            <Radio className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <div className="font-bold text-blue-950 flex items-center gap-2">
+                <span>Africa&apos;s Talking Sandbox Mode Active — Web Simulator Delivery Only</span>
+                <span className="px-1.5 py-0.5 rounded bg-blue-200 text-blue-800 text-[10px] font-semibold">No Cellular Handset Delivery</span>
+              </div>
+              <p className="text-blue-800 text-[11px] leading-relaxed">
+                In Sandbox mode, SMS messages are accepted by Africa&apos;s Talking and routed to the <strong>Africa&apos;s Talking Web Simulator</strong> (or simulator app). <strong>They are never delivered to physical cellular phones or mobile towers.</strong>
+              </p>
+              <p className="text-blue-700 text-[10px]">
+                To receive live SMS on physical Ugandan mobile phones (+256), the SACCO administrator must configure production credentials (<code className="font-mono bg-blue-100 px-1 py-0.5 rounded">SMS_ENVIRONMENT=PRODUCTION</code>).
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Real-time Status Counters & Configuration Metadata */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+            <span className="text-[10px] text-slate-400 uppercase font-bold block">Queued</span>
+            <span className="text-lg font-bold text-amber-700">
+              {diagnostics?.counts.pending ?? pendingCount}
+            </span>
+            <span className="text-[10px] text-slate-500 block">Pending dispatch</span>
+          </div>
+
+          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+            <span className="text-[10px] text-slate-400 uppercase font-bold block">Processing</span>
+            <span className="text-lg font-bold text-blue-700">
+              {diagnostics?.counts.sending ?? 0}
+            </span>
+            <span className="text-[10px] text-slate-500 block">In flight</span>
+          </div>
+
+          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+            <span className="text-[10px] text-slate-400 uppercase font-bold block">Submitted</span>
+            <span className="text-lg font-bold text-blue-700">
+              {diagnostics?.counts.sent ?? sentCount}
+            </span>
+            <span className="text-[10px] text-slate-500 block">Provider accepted</span>
+          </div>
+
+          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+            <span className="text-[10px] text-slate-400 uppercase font-bold block">Handset Delivered</span>
+            <span className="text-lg font-bold text-emerald-700">
+              {diagnostics?.counts.deliveredConfirmed ?? queue.filter(q => q.deliveryConfirmed).length}
+            </span>
+            <span className="text-[10px] text-slate-500 block">Telco DLR verified</span>
+          </div>
+
+          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+            <span className="text-[10px] text-slate-400 uppercase font-bold block">Failed</span>
+            <span className="text-lg font-bold text-rose-700">
+              {diagnostics?.counts.failed ?? failedCount}
+            </span>
+            <span className="text-[10px] text-slate-500 block">Delivery failed</span>
+          </div>
+
+          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+            <span className="text-[10px] text-slate-400 uppercase font-bold block">Sender ID</span>
+            <span className="text-sm font-bold font-mono text-slate-800 truncate block mt-0.5">
+              {diagnostics?.senderId || 'TURIHAMWE'}
+            </span>
+            <span className="text-[10px] text-slate-500 block">UCC Registered</span>
+          </div>
+        </div>
+
+        {/* Telemetry and Audit Sub-row */}
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-y-2 text-[11px] text-slate-500">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>
+              <strong>Last Successful Send:</strong>{' '}
+              {diagnostics?.lastSuccessfulSubmissionTime
+                ? new Date(diagnostics.lastSuccessfulSubmissionTime).toLocaleString()
+                : 'None recorded'}
+            </span>
+            <span>•</span>
+            <span>
+              <strong>Last Gateway Error:</strong>{' '}
+              {diagnostics?.lastErrorSanitized ? (
+                <span className="text-rose-600 font-medium">
+                  {diagnostics.lastErrorSanitized.slice(0, 80)}
+                  {diagnostics.lastErrorSanitized.length > 80 ? '...' : ''}
+                </span>
+              ) : (
+                <span className="text-emerald-600">None (Healthy)</span>
+              )}
+            </span>
+            {diagnostics?.balanceEstimateUGX && (
+              <>
+                <span>•</span>
+                <span>
+                  <strong>Balance:</strong> <span className="font-semibold text-slate-800">{diagnostics.balanceEstimateUGX}</span>
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 text-slate-400 text-[10px]">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Credentials secured on backend only • Zero client leakage</span>
           </div>
         </div>
       </div>
@@ -668,7 +1057,7 @@ export const SmsNotificationsView: React.FC = () => {
                           )}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          {renderStatusBadge(msg.status)}
+                          {renderStatusBadge(msg)}
                         </td>
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
@@ -1054,8 +1443,8 @@ export const SmsNotificationsView: React.FC = () => {
                   <span className="font-mono font-bold text-blue-700">{selectedMessage.recipientPhone}</span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[10px]">Status</span>
-                  <div className="mt-0.5">{renderStatusBadge(selectedMessage.status)}</div>
+                  <span className="text-slate-400 block text-[10px]">Transmission State</span>
+                  <div className="mt-0.5">{renderStatusBadge(selectedMessage)}</div>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Operating Branch</span>
@@ -1079,7 +1468,23 @@ export const SmsNotificationsView: React.FC = () => {
                 </div>
                 {selectedMessage.providerMessageId && (
                   <div className="col-span-2 font-mono">
-                    Provider Ref: {selectedMessage.providerMessageId}
+                    Provider Ref: <strong>{selectedMessage.providerMessageId}</strong>
+                  </div>
+                )}
+                <div className="col-span-2 flex flex-wrap gap-x-4 gap-y-1 bg-slate-50 p-2 rounded border border-slate-200">
+                  <span>
+                    Handset Delivered: <strong>{selectedMessage.deliveryConfirmed ? 'YES (Confirmed via DLR)' : 'NO'}</strong>
+                  </span>
+                  {selectedMessage.deliveryReceiptNetworkCode && (
+                    <span>• Telco Network: <strong>{selectedMessage.deliveryReceiptNetworkCode}</strong></span>
+                  )}
+                  {selectedMessage.deliveryReceiptAt && (
+                    <span>• DLR Time: {new Date(selectedMessage.deliveryReceiptAt).toLocaleString()}</span>
+                  )}
+                </div>
+                {diagnostics?.environment === 'SANDBOX' && (
+                  <div className="col-span-2 bg-blue-50 p-2 rounded text-blue-800 text-[11px] border border-blue-200">
+                    <strong>Sandbox Mode:</strong> Messages are accepted by Africa&apos;s Talking and routed to the virtual web simulator. They are not delivered to physical cellular phones.
                   </div>
                 )}
                 {selectedMessage.failureReason && (
@@ -1236,6 +1641,80 @@ export const SmsNotificationsView: React.FC = () => {
                   className="px-5 py-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg shadow-xs"
                 >
                   Save Template
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN TEST SMS DISPATCH MODAL */}
+      {isTestSendModalOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <FlaskConical className="w-5 h-5 text-blue-700" />
+                <h3 className="text-base font-bold text-slate-900">
+                  Africa&apos;s Talking Test Dispatch
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsTestSendModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-900 text-xs space-y-1">
+              <span className="font-bold block">Safe Administrative Diagnostic Verification</span>
+              <p className="text-[11px] leading-relaxed text-blue-800">
+                This transmits a single clearly-labelled test message to verify the live pipeline. Provider credentials remain held exclusively on the secure backend service.
+              </p>
+            </div>
+
+            <form onSubmit={handleAdminTestSend} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Recipient Telephone Number (Uganda E.164 format)
+                </label>
+                <input
+                  type="tel"
+                  required
+                  value={testSendPhone}
+                  onChange={e => setTestSendPhone(e.target.value)}
+                  placeholder="+256701234567"
+                  className="w-full p-2.5 border rounded-lg bg-white text-slate-900 font-mono text-sm"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Accepts +256..., 07..., or 256... Automatically normalized to Ugandan international E.164.
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                <span className="font-semibold block text-slate-700">Message Content Preview:</span>
+                <p className="font-mono text-slate-800 bg-white p-2 rounded border border-slate-200">
+                  [ADMIN DIAGNOSTIC TEST] Nyamuyanja SACCO Turihamwe SMS delivery test via Africa&apos;s Talking {diagnostics?.environment || 'SANDBOX'} at [Timestamp].
+                </p>
+              </div>
+
+              <div className="pt-3 border-t flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsTestSendModalOpen(false)}
+                  disabled={isTestSending}
+                  className="px-4 py-2 border rounded-lg text-slate-600 hover:bg-slate-100 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isTestSending || !testSendPhone}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg shadow-xs transition disabled:opacity-50"
+                >
+                  <Send className={`w-3.5 h-3.5 ${isTestSending ? 'animate-spin' : ''}`} />
+                  <span>{isTestSending ? 'Transmitting...' : 'Dispatch Test SMS'}</span>
                 </button>
               </div>
             </form>

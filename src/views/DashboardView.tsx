@@ -20,7 +20,9 @@ import {
   BarChart3,
   AlertTriangle,
   MessageSquare,
-  UserPlus
+  UserPlus,
+  Receipt,
+  Settings2
 } from 'lucide-react';
 import { NavigationTab } from '../components/layout/Sidebar';
 import { SystemAlert, MonthlyBranchSummary } from '../types';
@@ -267,6 +269,136 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onAddN
             <span className="text-[10px] text-slate-400">Requires institutional financial clearance</span>
           </div>
         )}
+      </div>
+
+      {/* Operational Modules & Quick Member Registration Action */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+              <Building className="w-4 h-4 text-blue-700" />
+              Institutional Operational Modules
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Access core functional workflows for Nyamuyanja SACCO Ltd.
+            </p>
+          </div>
+          <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded">
+            Branch Operations Active
+          </span>
+        </div>
+
+        {/* Modules Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {canViewMembers && (
+            <button
+              onClick={() => onNavigate('members')}
+              className="p-3.5 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50/40 transition flex flex-col items-center text-center gap-2 group cursor-pointer"
+            >
+              <div className="p-2 rounded-lg bg-blue-50 text-blue-700 group-hover:bg-blue-600 group-hover:text-white transition">
+                <Users className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-slate-800">Members</span>
+            </button>
+          )}
+
+          {canViewTurihamwe && (
+            <button
+              onClick={() => onNavigate('turihamwe')}
+              className="p-3.5 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/40 transition flex flex-col items-center text-center gap-2 group cursor-pointer"
+            >
+              <div className="p-2 rounded-lg bg-emerald-50 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white transition">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-slate-800">Turihamwe</span>
+            </button>
+          )}
+
+          {hasPermission('transactions.view') && (
+            <button
+              onClick={() => onNavigate('transactions')}
+              className="p-3.5 rounded-xl border border-slate-200 hover:border-amber-500 hover:bg-amber-50/40 transition flex flex-col items-center text-center gap-2 group cursor-pointer"
+            >
+              <div className="p-2 rounded-lg bg-amber-50 text-amber-700 group-hover:bg-amber-600 group-hover:text-white transition">
+                <Receipt className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-slate-800">Transactions</span>
+            </button>
+          )}
+
+          {canViewClaims && (
+            <button
+              onClick={() => onNavigate('claims')}
+              className="p-3.5 rounded-xl border border-slate-200 hover:border-purple-500 hover:bg-purple-50/40 transition flex flex-col items-center text-center gap-2 group cursor-pointer"
+            >
+              <div className="p-2 rounded-lg bg-purple-50 text-purple-700 group-hover:bg-purple-600 group-hover:text-white transition">
+                <FileText className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-slate-800">Claims</span>
+            </button>
+          )}
+
+          {canViewReports && (
+            <button
+              onClick={() => onNavigate('reports')}
+              className="p-3.5 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/40 transition flex flex-col items-center text-center gap-2 group cursor-pointer"
+            >
+              <div className="p-2 rounded-lg bg-indigo-50 text-indigo-700 group-hover:bg-indigo-600 group-hover:text-white transition">
+                <BarChart3 className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-slate-800">Reports</span>
+            </button>
+          )}
+
+          {canViewSms && (
+            <button
+              onClick={() => onNavigate('sms')}
+              className="p-3.5 rounded-xl border border-slate-200 hover:border-cyan-500 hover:bg-cyan-50/40 transition flex flex-col items-center text-center gap-2 group cursor-pointer"
+            >
+              <div className="p-2 rounded-lg bg-cyan-50 text-cyan-700 group-hover:bg-cyan-600 group-hover:text-white transition">
+                <MessageSquare className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-slate-800">SMS Alerts</span>
+            </button>
+          )}
+
+          {hasPermission('admin.system_settings') && (
+            <button
+              onClick={() => onNavigate('system')}
+              className="p-3.5 rounded-xl border border-slate-200 hover:border-slate-500 hover:bg-slate-100/50 transition flex flex-col items-center text-center gap-2 group cursor-pointer"
+            >
+              <div className="p-2 rounded-lg bg-slate-100 text-slate-700 group-hover:bg-slate-700 group-hover:text-white transition">
+                <Settings2 className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-slate-800">System Admin</span>
+            </button>
+          )}
+        </div>
+
+        {/* Action Button: Add New Member Directly Under The Modules */}
+        <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-blue-50/60 p-4 rounded-xl border border-blue-100">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-blue-600 text-white shrink-0 shadow-xs">
+              <UserPlus className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-blue-950">
+                Register New SACCO Member
+              </h4>
+              <p className="text-[11px] text-blue-700">
+                Onboard a new member to Nyamuyanja SACCO, assign account number, and enroll into the Turihamwe welfare scheme.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => (onAddNewMember ? onAddNewMember() : onNavigate('members'))}
+            className="px-4 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold shadow-xs hover:shadow-sm active:scale-[0.99] transition flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Add New Member</span>
+            <ArrowUpRight className="w-3.5 h-3.5 ml-0.5" />
+          </button>
+        </div>
       </div>
 
       {/* Two-Column Institutional Panels */}

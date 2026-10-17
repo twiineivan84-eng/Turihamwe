@@ -232,12 +232,15 @@ export class SeedService {
       }
     }
 
-    // Ensure essential SACCO members exist
-    const now = new Date();
-    const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 3600 * 1000).toISOString();
-    const fortyFiveDaysAgo = new Date(now.getTime() - 45 * 24 * 3600 * 1000).toISOString();
+    const isDeploymentReady = serverStore.getSystemSettings()['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true';
 
-    const seedMembersList: SaccoMember[] = [
+    if (!isDeploymentReady) {
+      // Ensure essential SACCO members exist
+      const now = new Date();
+      const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 3600 * 1000).toISOString();
+      const fortyFiveDaysAgo = new Date(now.getTime() - 45 * 24 * 3600 * 1000).toISOString();
+
+      const seedMembersList: SaccoMember[] = [
       {
         saccoAccountNumber: 'NYA-001042',
         fullName: 'Kato Emmanuel',
@@ -519,6 +522,7 @@ export class SeedService {
 
       serverStore.addClaim(claim1);
     }
+  }
 
     // Seed default SMS templates if none exist
     if (serverStore.getSmsTemplates().length === 0) {

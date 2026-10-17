@@ -140,6 +140,31 @@ export class TurihamweLocalDatabase extends Dexie {
       reportLogs: 'id, reportCode, reportCategory, branchId, generatedByUserId, timestamp',
     });
   }
+
+  public async clearAllOperationalData(): Promise<void> {
+    try {
+      await Promise.all([
+        this.members.clear(),
+        this.plans.clear(),
+        this.beneficiaries.clear(),
+        this.contributions.clear(),
+        this.renewals.clear(),
+        this.reactivations.clear(),
+        this.claims.clear(),
+        this.claimDocuments.clear(),
+        this.claimReviews.clear(),
+        this.auditLogs.clear(),
+        this.syncQueue.clear(),
+        this.syncConflicts.clear(),
+        this.smsQueue.clear(),
+        this.systemAlerts.clear(),
+        this.reportLogs.clear(),
+      ]);
+    } catch (err) {
+      console.warn('Could not clear some local IndexedDB tables:', err);
+    }
+  }
 }
 
 export const localDb = new TurihamweLocalDatabase();
+

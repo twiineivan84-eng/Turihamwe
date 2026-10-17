@@ -18,6 +18,7 @@ import { smsRouter } from './src/server/routes/smsRoutes';
 import { alertRouter } from './src/server/routes/alertRoutes';
 import { reportRouter } from './src/server/routes/reportRoutes';
 import { systemRouter } from './src/server/routes/systemRoutes';
+import { smsQueueWorker } from './src/server/services/smsQueueWorker';
 
 dotenv.config();
 
@@ -56,9 +57,17 @@ async function bootstrap() {
     next();
   });
 
+  // Security: Protect internal database, backups, and confidential storage from public web access
+  app.use(['/data', '/data/*'], (_req, res) => {
+    res.status(403).json({ error: 'Access forbidden: internal data repositories are protected from public web access.' });
+  });
+
   // Initialize persistence and database seed
   await serverStore.initialize();
   await SeedService.seedInitialData();
+
+  // Start background Africa's Talking SMS Queue Worker
+  smsQueueWorker.start();
 
   // Mount API endpoints
   app.use('/api/auth', authRouter);
@@ -81,6 +90,7 @@ async function bootstrap() {
     const users = serverStore.getUsers();
     const syncRecords = serverStore.getSyncRecords();
     const pendingSync = syncRecords.filter(r => r.status === 'PENDING').length;
+    const smsMessages = serverStore.getSmsMessages();
 
     res.json({
       status: 'ONLINE',
@@ -108,9 +118,15 @@ async function bootstrap() {
           maxUploadSizeMb: config.storage.maxUploadSizeMb,
         },
         sms: {
-          status: config.sms.enabled ? (config.sms.environment === 'PRODUCTION' ? 'LIVE_GATEWAY' : 'SANDBOX_MODE') : 'SIMULATED',
+          status: config.sms.enabled ? (config.sms.environment === 'PRODUCTION' ? 'LIVE_GATEWAY' : 'SANDBOX_MODE') : 'DISABLED',
+          provider: "Africa's Talking",
           environment: config.sms.environment,
           senderId: config.sms.senderId,
+          workerStatus: smsQueueWorker.getStatus(),
+          configurationStatus: smsQueueWorker.getDiagnostics().configurationStatus,
+          pendingMessages: smsMessages.filter(m => m.status === 'PENDING').length,
+          sentMessages: smsMessages.filter(m => m.status === 'SENT').length,
+          failedMessages: smsMessages.filter(m => m.status === 'FAILED').length,
         },
         backup: {
           enabled: config.backup.enabled,
@@ -138,6 +154,7 @@ async function bootstrap() {
         middlewareMode: true,
         host: '0.0.0.0',
         port: PORT,
+        allowedHosts: true,
         hmr: isHmrDisabled ? false : undefined,
         ws: (isHmrDisabled ? false : undefined) as false | undefined,
       },
@@ -147,9 +164,21 @@ async function bootstrap() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[TURIHAMWE SACCO] Server online on http://0.0.0.0:${PORT}`);
   });
+
+  // Graceful shutdown
+  const gracefulShutdown = () => {
+    console.log('[TURIHAMWE SACCO] Server shutting down, terminating background workers...');
+    smsQueueWorker.stop();
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', gracefulShutdown);
+  process.on('SIGINT', gracefulShutdown);
 }
 
 bootstrap().catch(err => {

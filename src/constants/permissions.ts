@@ -396,6 +396,7 @@ export const DEFAULT_ROLES: Role[] = [
       'alerts.view',
       'alerts.manage',
       'members.view',
+      'members.register',
       'members.edit',
       'members.delete',
       'members.search',

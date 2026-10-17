@@ -2,6 +2,8 @@ import { SmsMessage, SmsTemplate, NotificationEvent, TurihamwePlan, SaccoMember,
 import { serverStore } from '../storage/serverStore';
 import { AuditService } from './auditService';
 import { config } from '../config';
+import { AfricasTalkingAdapter } from './africasTalkingAdapter';
+import { smsQueueWorker } from './smsQueueWorker';
 
 export class SmsService {
   /**
@@ -117,6 +119,8 @@ export class SmsService {
 
   /**
    * Dispatch an SMS message through Africa's Talking API
+  /**
+   * Dispatch an SMS message through Africa's Talking API
    */
   public static async dispatchMessage(messageId: string): Promise<{ success: boolean; message: SmsMessage; error?: string }> {
     const sms = serverStore.getSmsById(messageId);
@@ -128,79 +132,63 @@ export class SmsService {
       return { success: true, message: sms };
     }
 
-    if (!config.sms.enabled) {
-      sms.status = 'SENT';
-      sms.updatedAt = new Date().toISOString();
+    // Check configuration status first
+    const validation = AfricasTalkingAdapter.validateConfiguration();
+    if (!validation.canSubmit) {
+      // Retain queued messages in PENDING without claiming they are sent
+      sms.failureReason = validation.message;
+      sms.lockedAt = undefined;
+      sms.lockedBy = undefined;
       serverStore.updateSmsMessage(sms);
-      return { success: true, message: sms };
+
+      serverStore.recordSmsTelemetry({
+        lastErrorSanitized: validation.message,
+        lastErrorTime: new Date().toISOString(),
+      });
+
+      return {
+        success: false,
+        message: sms,
+        error: validation.message,
+      };
     }
 
+    // Mark as SENDING while in transit
     sms.status = 'SENDING';
+    sms.lastAttemptAt = new Date().toISOString();
     sms.updatedAt = new Date().toISOString();
     serverStore.updateSmsMessage(sms);
 
-    const apiKey = config.sms.apiKey;
-    const username = config.sms.username;
-    const isSandbox = config.sms.environment === 'SANDBOX' || !apiKey || username.toLowerCase() === 'sandbox';
-    const senderId = config.sms.senderId;
+    const submission = await AfricasTalkingAdapter.submitMessage({
+      to: sms.recipientPhone,
+      messageText: sms.messageText,
+      senderId: config.sms.senderId,
+    });
 
-    try {
-      if (apiKey && !isSandbox) {
-        // Production or active Sandbox with live API credentials
-        const endpoint = 'https://api.africastalking.com/version1/messaging';
-        const bodyParams = new URLSearchParams({
-          username,
-          to: sms.recipientPhone,
-          message: sms.messageText,
-        });
-        if (senderId) bodyParams.append('from', senderId);
-
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'apiKey': apiKey,
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-          },
-          body: bodyParams.toString(),
-        });
-
-        const data: any = await response.json();
-        const recipient = data?.SMSMessageData?.Recipients?.[0];
-
-        if (recipient && (recipient.status === 'Success' || recipient.statusCode === 101)) {
-          sms.status = 'SENT';
-          sms.sentAt = new Date().toISOString();
-          sms.providerMessageId = recipient.messageId || `ATXid_${Date.now()}`;
-          sms.providerCostUGX = recipient.cost ? parseFloat(recipient.cost.replace(/[^0-9.]/g, '')) : 30.0;
-          sms.deliveryStatus = recipient.status;
-          sms.failureReason = undefined;
-        } else {
-          throw new Error(recipient?.status || data?.SMSMessageData?.Message || 'Africa\'s Talking API rejected dispatch');
-        }
-      } else {
-        // Africa's Talking Sandbox Simulation / Development Mode
-        // Validates Ugandan phone numbers (+256...)
-        if (!sms.recipientPhone.startsWith('+256')) {
-          throw new Error('Invalid telephone format: Ugandan international format (+256...) is required');
-        }
-
-        // Simulate successful sandbox delivery
-        sms.status = 'SENT';
-        sms.sentAt = new Date().toISOString();
-        sms.providerMessageId = `ATXid_sandbox_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        sms.providerCostUGX = 30.0; // Standard Uganda SMS rate
-        sms.deliveryStatus = 'Success';
-        sms.failureReason = undefined;
-      }
-
+    if (submission.success) {
+      const isSandbox = config.sms.environment === 'SANDBOX';
+      sms.status = 'SENT';
+      sms.sentAt = new Date().toISOString();
+      sms.providerMessageId = submission.providerMessageId;
+      sms.providerCostUGX = submission.costUGX || 30.0;
+      sms.deliveryStatus = submission.deliveryStatus || (isSandbox ? 'SimulatedSandbox' : 'Submitted');
+      sms.deliveryConfirmed = false;
+      sms.failureReason = undefined;
+      sms.nextRetryAt = undefined;
+      sms.lockedAt = undefined;
+      sms.lockedBy = undefined;
       sms.updatedAt = new Date().toISOString();
       serverStore.updateSmsMessage(sms);
+
+      serverStore.recordSmsTelemetry({
+        lastSuccessTime: new Date().toISOString(),
+        lastSubmissionTime: new Date().toISOString(),
+      });
 
       AuditService.log({
         userId: 'system',
         username: 'AFRICAS_TALKING_GATEWAY',
-        userFullName: 'Africa\'s Talking SMS Gateway',
+        userFullName: "Africa's Talking SMS Gateway",
         branchId: sms.branchId,
         branchName: sms.branchName,
         action: 'SMS_SENT',
@@ -210,41 +198,67 @@ export class SmsService {
           providerMsgId: sms.providerMessageId,
           costUGX: sms.providerCostUGX,
           recipient: sms.recipientPhone,
+          deliveryStatus: sms.deliveryStatus,
+          deliveryConfirmed: false,
+          environment: config.sms.environment,
         }),
-        reason: 'SMS successfully dispatched to telecommunications network',
+        reason: isSandbox
+          ? "SMS accepted by Africa's Talking Sandbox; routed to virtual simulator (not physical GSM handset)"
+          : "SMS accepted by Africa's Talking gateway; queued for mobile telecom dispatch",
       });
 
       return { success: true, message: sms };
-    } catch (err: any) {
-      sms.status = 'FAILED';
-      sms.failedAt = new Date().toISOString();
-      sms.failureReason = err.message || 'Transmission timeout to SMS gateway';
-      sms.retryCount += 1;
+    } else {
+      const errorMsg = submission.error || 'Submission failed';
+      const willRetry = submission.isTransientFailure && (sms.retryCount + 1 < sms.maxRetries);
+
+      if (willRetry) {
+        sms.retryCount += 1;
+        const delaySeconds = Math.min(15 * Math.pow(2, sms.retryCount - 1), 3600);
+        sms.nextRetryAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
+        sms.status = 'PENDING';
+        sms.failureReason = `Retry ${sms.retryCount}/${sms.maxRetries}: ${errorMsg}`;
+      } else {
+        sms.status = 'FAILED';
+        sms.failedAt = new Date().toISOString();
+        sms.failureReason = errorMsg;
+        sms.retryCount += 1;
+        sms.nextRetryAt = undefined;
+
+        // Create alert for staff
+        serverStore.addAlert({
+          id: `alt-sms-${Date.now()}`,
+          category: 'SMS_FAILURE',
+          severity: 'WARNING',
+          title: `SMS Dispatch Failed to ${sms.recipientName}`,
+          message: `Failed to deliver notification to ${sms.recipientPhone}: ${sms.failureReason}. Click to retry in SMS Queue.`,
+          branchId: sms.branchId,
+          branchName: sms.branchName,
+          linkTab: 'system',
+          recordId: sms.id,
+          requiredPermission: 'sms.retry_failed',
+          status: 'UNREAD',
+          readByUsers: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      sms.lockedAt = undefined;
+      sms.lockedBy = undefined;
       sms.updatedAt = new Date().toISOString();
       serverStore.updateSmsMessage(sms);
 
-      // Create an alert for staff
-      serverStore.addAlert({
-        id: `alt-sms-${Date.now()}`,
-        category: 'SMS_FAILURE',
-        severity: 'WARNING',
-        title: `SMS Dispatch Failed to ${sms.recipientName}`,
-        message: `Failed to deliver notification to ${sms.recipientPhone}: ${sms.failureReason}. Click to retry in SMS Queue.`,
-        branchId: sms.branchId,
-        branchName: sms.branchName,
-        linkTab: 'system',
-        recordId: sms.id,
-        requiredPermission: 'sms.retry_failed',
-        status: 'UNREAD',
-        readByUsers: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+      serverStore.recordSmsTelemetry({
+        lastErrorSanitized: errorMsg,
+        lastErrorTime: new Date().toISOString(),
+        lastSubmissionTime: new Date().toISOString(),
       });
 
       AuditService.log({
         userId: 'system',
         username: 'SMS_GATEWAY',
-        userFullName: 'Africa\'s Talking Gateway',
+        userFullName: "Africa's Talking Gateway",
         branchId: sms.branchId,
         branchName: sms.branchName,
         action: 'SMS_FAILED',
@@ -259,20 +273,15 @@ export class SmsService {
   }
 
   /**
-   * Process all pending messages in queue
+   * Process all pending messages in queue via worker
    */
   public static async processQueue(): Promise<{ processed: number; sent: number; failed: number }> {
-    const queue = serverStore.getSmsMessages().filter(m => m.status === 'PENDING');
-    let sent = 0;
-    let failed = 0;
-
-    for (const msg of queue) {
-      const res = await this.dispatchMessage(msg.id);
-      if (res.success) sent++;
-      else failed++;
-    }
-
-    return { processed: queue.length, sent, failed };
+    const res = await smsQueueWorker.tick();
+    return {
+      processed: res.claimed,
+      sent: res.sent,
+      failed: res.failed,
+    };
   }
 
   /**
@@ -374,5 +383,100 @@ export class SmsService {
     }
 
     return { eventsCreated, messagesQueued };
+  }
+
+  /**
+   * Process Africa's Talking Delivery Report (DLR) callback idempotently.
+   */
+  public static processDeliveryReport(params: {
+    id: string;
+    status: string;
+    phoneNumber?: string;
+    networkCode?: string;
+    failureReason?: string;
+  }): { success: boolean; found: boolean; message?: SmsMessage; isIdempotent?: boolean } {
+    const { id, status, phoneNumber, networkCode, failureReason } = params;
+    if (!id || !status) {
+      return { success: false, found: false };
+    }
+
+    const existingMessage = serverStore.getSmsByProviderMessageId(id);
+    if (!existingMessage) {
+      return { success: true, found: false };
+    }
+
+    const normalizedStatus = String(status).trim();
+    const now = new Date().toISOString();
+
+    // Idempotency: skip if already recorded with same receipt status
+    if (existingMessage.deliveryReceiptRawStatus === normalizedStatus) {
+      return { success: true, found: true, message: existingMessage, isIdempotent: true };
+    }
+
+    existingMessage.deliveryReceiptAt = now;
+    existingMessage.deliveryReceiptRawStatus = normalizedStatus;
+    if (networkCode) existingMessage.deliveryReceiptNetworkCode = String(networkCode);
+
+    if (normalizedStatus === 'Success') {
+      existingMessage.deliveryStatus = 'Delivered';
+      existingMessage.deliveryConfirmed = true;
+      existingMessage.updatedAt = now;
+      serverStore.updateSmsMessage(existingMessage);
+
+      AuditService.log({
+        userId: 'system',
+        username: 'AFRICAS_TALKING_DLR',
+        userFullName: "Africa's Talking Delivery Receipt",
+        branchId: existingMessage.branchId,
+        branchName: existingMessage.branchName,
+        action: 'SMS_DELIVERY_CONFIRMED',
+        recordType: 'SMS',
+        recordId: existingMessage.id,
+        newValue: JSON.stringify({
+          providerMessageId: id,
+          recipient: phoneNumber || existingMessage.recipientPhone,
+          networkCode,
+          status: normalizedStatus,
+        }),
+        reason: 'Telecommunications operator confirmed successful delivery to recipient handset',
+      });
+    } else if (['Failed', 'Rejected', 'AbsentSubscriber', 'Expired'].includes(normalizedStatus)) {
+      existingMessage.deliveryStatus = normalizedStatus;
+      existingMessage.deliveryConfirmed = false;
+      existingMessage.status = 'FAILED';
+      const reasonText = AfricasTalkingAdapter.sanitizeError(
+        failureReason || `Telco delivery failure: ${normalizedStatus} (Network: ${networkCode || 'N/A'})`
+      );
+      existingMessage.failureReason = reasonText;
+      existingMessage.failedAt = now;
+      existingMessage.updatedAt = now;
+      serverStore.updateSmsMessage(existingMessage);
+
+      AuditService.log({
+        userId: 'system',
+        username: 'AFRICAS_TALKING_DLR',
+        userFullName: "Africa's Talking Delivery Receipt",
+        branchId: existingMessage.branchId,
+        branchName: existingMessage.branchName,
+        action: 'SMS_DELIVERY_FAILED',
+        recordType: 'SMS',
+        recordId: existingMessage.id,
+        newValue: JSON.stringify({
+          providerMessageId: id,
+          recipient: phoneNumber || existingMessage.recipientPhone,
+          networkCode,
+          status: normalizedStatus,
+          reason: reasonText,
+        }),
+        reason: `Telecommunications operator reported delivery failure: ${normalizedStatus}`,
+      });
+    } else {
+      existingMessage.deliveryStatus = normalizedStatus;
+      existingMessage.deliveryConfirmed = false;
+      existingMessage.updatedAt = now;
+      serverStore.updateSmsMessage(existingMessage);
+    }
+
+    return { success: true, found: true, message: existingMessage };
   }
 }

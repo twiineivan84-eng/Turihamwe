@@ -164,6 +164,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onAdd
     return hasAnyPermission(item.requiredPermissions);
   });
 
+  const canRegisterMember =
+    hasPermission('members.register') ||
+    hasPermission('members.view') ||
+    hasPermission('admin.system_settings') ||
+    user?.roleCode === 'IT_OFFICER' ||
+    user?.roleCode === 'GM';
+
   return (
     <aside className="w-64 bg-white text-slate-700 flex flex-col shrink-0 border-r border-slate-200">
       {/* Branch Context Indicator */}
@@ -207,7 +214,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onAdd
         })}
 
         {/* Action Button: Add New Member under the modules */}
-        {hasPermission('members.register') && (
+        {canRegisterMember && (
           <div className="pt-3 mt-3 border-t border-slate-200/80">
             <button
               onClick={() => (onAddNewMember ? onAddNewMember() : onSelectTab('members'))}

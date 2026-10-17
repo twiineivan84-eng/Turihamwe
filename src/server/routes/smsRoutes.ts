@@ -3,6 +3,8 @@ import { requireAuth, requirePermission, AuthenticatedRequest } from '../middlew
 import { serverStore } from '../storage/serverStore';
 import { AuditService } from '../services/auditService';
 import { SmsService } from '../services/smsService';
+import { AfricasTalkingAdapter } from '../services/africasTalkingAdapter';
+import { smsQueueWorker } from '../services/smsQueueWorker';
 import { SmsTemplate, SmsMessage } from '../../types';
 
 export const smsRouter = Router();
@@ -281,3 +283,167 @@ smsRouter.post('/evaluate-expiries', requirePermission('sms.configure_events'), 
     message: `Evaluated policies: generated ${result.eventsCreated} notification events, queued ${result.messagesQueued} SMS messages.`,
   });
 });
+
+// ==========================================
+// 10. GET PROVIDER DIAGNOSTICS
+// ==========================================
+smsRouter.get('/diagnostics', requirePermission('sms.view_queue'), (_req: AuthenticatedRequest, res: Response) => {
+  const diagnostics = smsQueueWorker.getDiagnostics();
+  res.json({
+    success: true,
+    data: diagnostics,
+  });
+});
+
+// ==========================================
+// 11. TEST PROVIDER CONNECTION (SAFE: NO SMS SENT)
+// ==========================================
+smsRouter.post('/test-connection', requirePermission('sms.view_queue'), async (_req: AuthenticatedRequest, res: Response) => {
+  const result = await AfricasTalkingAdapter.testConnection();
+  res.json({
+    success: result.connected,
+    data: result,
+    message: result.message,
+  });
+});
+
+// ==========================================
+// 12. EXPLICIT ADMIN TEST DISPATCH (SANDBOX/LIVE)
+// ==========================================
+smsRouter.post('/test-send', requirePermission('sms.send'), async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const workingBranch = req.workingBranch;
+  const { recipientPhone, confirmSandboxTest } = req.body;
+
+  if (!confirmSandboxTest) {
+    res.status(400).json({ success: false, error: 'Administrative confirmation required to execute provider test dispatch.' });
+    return;
+  }
+
+  if (!recipientPhone) {
+    res.status(400).json({ success: false, error: 'Recipient phone number is required.' });
+    return;
+  }
+
+  const formattedPhone = SmsService.formatUgandanPhone(recipientPhone);
+  const validation = AfricasTalkingAdapter.validateConfiguration();
+
+  if (!validation.canSubmit) {
+    res.status(400).json({
+      success: false,
+      error: validation.message,
+      configurationStatus: validation.status,
+    });
+    return;
+  }
+
+  const testMessageText = `[ADMIN DIAGNOSTIC TEST] Nyamuyanja SACCO Turihamwe SMS delivery test via Africa's Talking ${validation.environment} at ${new Date().toLocaleTimeString()}.`;
+
+  const queueResult = SmsService.queueMessage({
+    recipientPhone: formattedPhone,
+    recipientName: `Test Recipient (${user.username})`,
+    messageText: testMessageText,
+    branchId: workingBranch?.id || 'br-nya',
+    branchName: workingBranch?.name || 'Central Head Office',
+    queuedByUserId: user.id,
+    queuedByUserFullName: user.fullName,
+    eventReferenceKey: `ADMIN-TEST-${Date.now()}`,
+    templateCategory: 'CUSTOM_ANNOUNCEMENT',
+  });
+
+  if (queueResult.isDuplicate || !queueResult.message) {
+    res.status(409).json({ success: false, error: 'Duplicate test dispatch prevented.' });
+    return;
+  }
+
+  const dispatchResult = await SmsService.dispatchMessage(queueResult.message.id);
+
+  res.json({
+    success: dispatchResult.success,
+    data: dispatchResult.message,
+    message: dispatchResult.success
+      ? `Provider accepted test message (ID: ${dispatchResult.message.providerMessageId}).`
+      : `Provider rejected dispatch: ${dispatchResult.error}`,
+  });
+});
+
+// ==========================================
+// 13. WORKER CONTROL: START / STOP
+// ==========================================
+smsRouter.post('/worker/start', requirePermission('admin.system_settings'), (_req: AuthenticatedRequest, res: Response) => {
+  smsQueueWorker.start();
+  res.json({
+    success: true,
+    message: 'SMS Queue Worker started successfully.',
+    workerStatus: smsQueueWorker.getStatus(),
+  });
+});
+
+smsRouter.post('/worker/stop', requirePermission('admin.system_settings'), (_req: AuthenticatedRequest, res: Response) => {
+  smsQueueWorker.stop();
+  res.json({
+    success: true,
+    message: 'SMS Queue Worker stopped.',
+    workerStatus: smsQueueWorker.getStatus(),
+  });
+});
+
+// ==========================================
+// 14. AFRICA'S TALKING DELIVERY REPORT (DLR) CALLBACK
+// ==========================================
+/**
+ * Africa's Talking Delivery Reports (DLR) Webhook.
+ * Official specification:
+ * POST parameters (application/x-www-form-urlencoded or JSON):
+ * - id: unique message ID returned during submission (e.g. ATXid_...)
+ * - status: 'Success' | 'Sent' | 'Submitted' | 'Buffered' | 'Rejected' | 'Failed' | 'AbsentSubscriber' | 'Expired'
+ * - phoneNumber: recipient's phone number
+ * - networkCode: telco network operator code (e.g. 64101)
+ * - failureReason: optional failure explanation
+ */
+const handleDeliveryReport = (req: any, res: Response) => {
+  // Validate optional secret token if configured on backend
+  const callbackToken = process.env.SMS_CALLBACK_TOKEN;
+  if (callbackToken) {
+    const providedToken = req.query.token || req.headers['x-callback-token'];
+    if (providedToken !== callbackToken) {
+      res.status(401).json({ success: false, error: 'Unauthorized delivery report callback' });
+      return;
+    }
+  }
+
+  const { id, status, phoneNumber, networkCode, failureReason } = req.body;
+
+  if (!id || !status) {
+    res.status(400).json({ success: false, error: 'id and status parameters are required' });
+    return;
+  }
+
+  const result = SmsService.processDeliveryReport({
+    id,
+    status,
+    phoneNumber,
+    networkCode,
+    failureReason,
+  });
+
+  if (!result.found) {
+    res.status(200).json({
+      success: true,
+      message: 'Delivery report received but no matching internal message found',
+    });
+    return;
+  }
+
+  res.status(200).json({
+    success: true,
+    message: result.isIdempotent
+      ? 'Delivery report already processed (idempotent)'
+      : `Delivery report for message ${id} updated to ${status}`,
+    deliveryConfirmed: result.message?.deliveryConfirmed ?? false,
+  });
+};
+
+smsRouter.post('/delivery-report', handleDeliveryReport);
+smsRouter.post('/callback', handleDeliveryReport);
+

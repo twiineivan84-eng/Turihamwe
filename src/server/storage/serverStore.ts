@@ -298,6 +298,7 @@ class ServerStore {
         } else if (existing.isSystem) {
           // Synchronize system role permissions with defined matrix
           if (existing.code === 'IT_OFFICER') {
+            if (!existing.permissions.includes('members.register')) existing.permissions.push('members.register');
             if (!existing.permissions.includes('members.edit')) existing.permissions.push('members.edit');
             if (!existing.permissions.includes('members.delete')) existing.permissions.push('members.delete');
           } else {
@@ -336,6 +337,10 @@ class ServerStore {
   }
 
   private seedDefaultDataIfEmpty(): void {
+    if (this.state.systemSettings['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true') {
+      return;
+    }
+
     const hq = this.state.branches[0];
     const kagarama = this.state.branches[1];
     const masha = this.state.branches[5] || hq;
@@ -759,6 +764,39 @@ class ServerStore {
     };
     this.save();
     return this.state.users[idx];
+  }
+
+  public deleteUser(id: string): { success: boolean; message: string; deletedUser?: User } {
+    const idx = this.state.users.findIndex(u => u.id === id);
+    if (idx === -1) {
+      return { success: false, message: 'Staff user not found.' };
+    }
+
+    const targetUser = this.state.users[idx];
+
+    // Cannot delete the root IT Administrator account
+    if (targetUser.username.toLowerCase() === 'ivan') {
+      return { success: false, message: 'Institutional root IT Administrator account (ivan) is protected and cannot be deleted.' };
+    }
+
+    // Check if user is the last active administrator
+    const activeAdmins = this.state.users.filter(u =>
+      u.isActive &&
+      (u.roleName?.includes('IT Officer') || u.roleName?.includes('General Manager')) &&
+      u.id !== id
+    );
+
+    if (activeAdmins.length === 0) {
+      return { success: false, message: 'Cannot delete the only remaining active systems administrator.' };
+    }
+
+    const [deletedUser] = this.state.users.splice(idx, 1);
+    this.save();
+    return {
+      success: true,
+      message: `Staff account '${deletedUser.fullName}' (@${deletedUser.username}) deleted successfully.`,
+      deletedUser,
+    };
   }
 
   // Members
@@ -1635,6 +1673,11 @@ class ServerStore {
     return this.state.smsQueue.find(m => m.id === id);
   }
 
+  public getSmsByProviderMessageId(providerMessageId: string): SmsMessage | undefined {
+    if (!providerMessageId) return undefined;
+    return this.state.smsQueue.find(m => m.providerMessageId === providerMessageId);
+  }
+
   public addSmsMessage(message: SmsMessage): void {
     this.state.smsQueue.unshift(message);
     this.save();
@@ -1646,6 +1689,79 @@ class ServerStore {
       this.state.smsQueue[idx] = message;
       this.save();
     }
+  }
+
+  public claimPendingSms(workerId: string, limit = 10): SmsMessage[] {
+    const now = Date.now();
+    const staleLockThreshold = 5 * 60 * 1000; // 5 minutes stale lock recovery
+    const claimed: SmsMessage[] = [];
+
+    for (const msg of this.state.smsQueue) {
+      if (claimed.length >= limit) break;
+
+      if (msg.status === 'PENDING') {
+        const retryReady = !msg.nextRetryAt || new Date(msg.nextRetryAt).getTime() <= now;
+        const lockExpired = !msg.lockedAt || (now - new Date(msg.lockedAt).getTime() > staleLockThreshold);
+
+        if (retryReady && lockExpired) {
+          msg.status = 'SENDING';
+          msg.lockedAt = new Date(now).toISOString();
+          msg.lockedBy = workerId;
+          msg.lastAttemptAt = new Date(now).toISOString();
+          msg.updatedAt = new Date(now).toISOString();
+          claimed.push(msg);
+        }
+      }
+    }
+
+    if (claimed.length > 0) {
+      this.save();
+    }
+    return claimed;
+  }
+
+  public releaseSmsLock(id: string): void {
+    const msg = this.state.smsQueue.find(m => m.id === id);
+    if (msg) {
+      msg.lockedAt = undefined;
+      msg.lockedBy = undefined;
+      this.save();
+    }
+  }
+
+  public recordSmsTelemetry(telemetry: {
+    lastSubmissionTime?: string;
+    lastSuccessTime?: string;
+    lastErrorSanitized?: string;
+    lastErrorTime?: string;
+    balanceEstimateUGX?: string | null;
+  }): void {
+    if (telemetry.lastSubmissionTime) {
+      this.state.systemSettings['sms.last_submission_time'] = telemetry.lastSubmissionTime;
+    }
+    if (telemetry.lastSuccessTime) {
+      this.state.systemSettings['sms.last_success_time'] = telemetry.lastSuccessTime;
+    }
+    if (telemetry.lastErrorSanitized !== undefined) {
+      this.state.systemSettings['sms.last_error_sanitized'] = telemetry.lastErrorSanitized;
+    }
+    if (telemetry.lastErrorTime) {
+      this.state.systemSettings['sms.last_error_time'] = telemetry.lastErrorTime;
+    }
+    if (telemetry.balanceEstimateUGX !== undefined) {
+      this.state.systemSettings['sms.balance_estimate'] = telemetry.balanceEstimateUGX || '';
+    }
+    this.save();
+  }
+
+  public getSmsTelemetry() {
+    return {
+      lastSubmissionTime: this.state.systemSettings['sms.last_submission_time'],
+      lastSuccessTime: this.state.systemSettings['sms.last_success_time'],
+      lastErrorSanitized: this.state.systemSettings['sms.last_error_sanitized'],
+      lastErrorTime: this.state.systemSettings['sms.last_error_time'],
+      balanceEstimateUGX: this.state.systemSettings['sms.balance_estimate'] || null,
+    };
   }
 
   public getNotificationEvents(filter?: { branchId?: string; eventType?: string }): NotificationEvent[] {
@@ -2357,6 +2473,124 @@ class ServerStore {
     this.save();
 
     return { success: true, record };
+  }
+
+  public clearAllOperationalData(adminUserId?: string, adminUsername?: string): {
+    clearedMembers: number;
+    clearedPlans: number;
+    clearedClaims: number;
+    clearedContributions: number;
+    clearedRenewals: number;
+    clearedBackups: number;
+    clearedTestUsers: number;
+    clearedTestSms: number;
+  } {
+    const userCountBefore = this.state.users.length;
+    this.state.users = this.state.users.filter(u => !u.id.startsWith('usr-test-') && !/^u\d{4}$/.test(u.username));
+    const clearedTestUsers = userCountBefore - this.state.users.length;
+
+    const smsCountBefore = this.state.smsQueue.length;
+    // Discard test fixtures (e.g. placeholder phones, test accounts), preserve genuine member notifications
+    this.state.smsQueue = this.state.smsQueue.filter(m => {
+      if (m.recipientPhone === '+256701234567' || m.recipientPhone === '+256701123456') return false;
+      if (m.saccoAccountNumber && (m.saccoAccountNumber.includes('TEST') || m.saccoAccountNumber.includes('E2E'))) return false;
+      return true;
+    });
+    const clearedTestSms = smsCountBefore - this.state.smsQueue.length;
+
+    const counts = {
+      clearedMembers: this.state.members.length,
+      clearedPlans: this.state.plans.length,
+      clearedClaims: this.state.claims.length,
+      clearedContributions: this.state.contributions.length,
+      clearedRenewals: this.state.renewals.length,
+      clearedBackups: this.state.backups.length,
+      clearedTestUsers,
+      clearedTestSms,
+    };
+
+    // Purge operational state tables
+    this.state.members = [];
+    this.state.plans = [];
+    this.state.beneficiaries = [];
+    this.state.contributions = [];
+    this.state.renewals = [];
+    this.state.reactivations = [];
+    this.state.claims = [];
+    this.state.corrections = [];
+    this.state.notificationEvents = [];
+    this.state.alerts = [];
+    this.state.reportHistory = [];
+    this.state.syncRecords = [];
+    this.state.backups = [];
+
+    // Mark deployment status as clean production ready
+    this.state.systemSettings['deployment.ready'] = 'true';
+    this.state.systemSettings['deployment.clearedAt'] = new Date().toISOString();
+    this.state.systemSettings['deployment.status'] = 'READY_FOR_PRODUCTION';
+
+    // Clear backup directory files on disk
+    try {
+      if (fs.existsSync(BACKUPS_DIR)) {
+        const files = fs.readdirSync(BACKUPS_DIR);
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            try { fs.unlinkSync(path.join(BACKUPS_DIR, file)); } catch {}
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not purge backup files:', e);
+    }
+
+    // Clear uploads directory files on disk
+    try {
+      if (fs.existsSync(config.storage.uploadPath)) {
+        const files = fs.readdirSync(config.storage.uploadPath);
+        for (const file of files) {
+          try { fs.unlinkSync(path.join(config.storage.uploadPath, file)); } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn('Could not purge upload files:', e);
+    }
+
+    // Clear sqlite cache if exists
+    try {
+      if (fs.existsSync(config.database.sqlitePath)) {
+        fs.unlinkSync(config.database.sqlitePath);
+      }
+    } catch (e) {
+      console.warn('Could not remove sqlite cache:', e);
+    }
+
+    // Fresh initial production audit entry
+    const hq = this.state.branches[0] || INITIAL_BRANCHES[0];
+    this.state.auditLogs = [
+      {
+        id: `audit-deploy-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        userId: adminUserId || 'usr-it-01',
+        username: adminUsername || 'itadm',
+        userFullName: 'IT Systems Officer',
+        branchId: hq.id,
+        branchName: hq.name,
+        action: 'SYSTEM_SETTING_CHANGED',
+        recordType: 'CONFIGURATION',
+        recordId: 'DEPLOYMENT_CLEAN_INITIALIZATION',
+        newValue: 'Operational database sanitized for production deployment. All pre-go-live test records cleared.',
+        reason: 'Institutional deployment preparation - pre-production database cleanup',
+        isSynced: true,
+      },
+    ];
+
+    // Create fresh baseline backup of clean production state
+    this.createInitialBaselineBackup();
+
+    // Persist immediately to disk
+    this.save();
+
+    return counts;
   }
 
   private createInitialBaselineBackup(): void {

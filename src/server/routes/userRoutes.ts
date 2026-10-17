@@ -337,20 +337,49 @@ userRouter.get('/:id', requireAuth, (req: AuthenticatedRequest, res: Response) =
   });
 });
 
-// Edit user profile details (fullName, email, phone, primaryBranchId)
-userRouter.put('/:id', requireAuth, requirePermission('admin.manage_users'), (req: AuthenticatedRequest, res: Response) => {
+// Edit user profile details (fullName, username, email, phone, primaryBranchId, optional password)
+userRouter.put('/:id', requireAuth, requirePermission('admin.manage_users'), async (req: AuthenticatedRequest, res: Response) => {
   const targetUser = serverStore.getUserById(req.params.id);
   if (!targetUser) {
     res.status(404).json({ success: false, message: 'Target user not found.' });
     return;
   }
 
-  const { fullName, email, phone, primaryBranchId } = req.body;
+  const { fullName, username, email, phone, primaryBranchId, password } = req.body;
   const updates: Partial<User> = {};
 
   if (fullName) updates.fullName = fullName.trim();
   if (email !== undefined) updates.email = email.trim();
   if (phone !== undefined) updates.phone = phone.trim();
+
+  // Username validation if updated
+  if (username && username.trim().toLowerCase() !== targetUser.username.toLowerCase()) {
+    const cleanUsername = username.trim().toLowerCase();
+    if (cleanUsername.length < 4 || cleanUsername.length > 6) {
+      res.status(400).json({
+        success: false,
+        message: 'Username must be strictly between 4 and 6 characters.',
+      });
+      return;
+    }
+    if (!/^[a-z0-9_]+$/.test(cleanUsername)) {
+      res.status(400).json({
+        success: false,
+        message: 'Username may only contain letters, numbers, and underscores.',
+      });
+      return;
+    }
+
+    const existing = serverStore.getUserByUsername(cleanUsername);
+    if (existing && existing.id !== targetUser.id) {
+      res.status(400).json({
+        success: false,
+        message: `Username '${cleanUsername}' is already assigned to another staff member.`,
+      });
+      return;
+    }
+    updates.username = cleanUsername;
+  }
 
   if (primaryBranchId && primaryBranchId !== targetUser.primaryBranchId) {
     const branch = serverStore.getBranchById(primaryBranchId);
@@ -361,14 +390,33 @@ userRouter.put('/:id', requireAuth, requirePermission('admin.manage_users'), (re
     updates.primaryBranchId = branch.id;
   }
 
+  if (password && typeof password === 'string' && password.trim().length > 0) {
+    if (password.length < 8) {
+      res.status(400).json({
+        success: false,
+        message: 'Password must be at least 8 characters long.',
+      });
+      return;
+    }
+    updates.passwordHash = await bcrypt.hash(password, 10);
+    updates.requiresPasswordReset = false;
+  }
+
   const previousSummary = JSON.stringify({
     fullName: targetUser.fullName,
+    username: targetUser.username,
     email: targetUser.email,
     phone: targetUser.phone,
     primaryBranchId: targetUser.primaryBranchId,
   });
 
   const updated = serverStore.updateUser(targetUser.id, updates);
+
+  const auditUpdates = { ...updates };
+  if (auditUpdates.passwordHash) {
+    delete auditUpdates.passwordHash;
+    (auditUpdates as any).passwordUpdated = true;
+  }
 
   AuditService.log({
     userId: req.user!.id,
@@ -380,7 +428,7 @@ userRouter.put('/:id', requireAuth, requirePermission('admin.manage_users'), (re
     recordType: 'USERS',
     recordId: targetUser.id,
     previousValue: previousSummary,
-    newValue: JSON.stringify(updates),
+    newValue: JSON.stringify(auditUpdates),
     reason: req.body.reason || 'Staff profile information updated',
   });
 
@@ -389,6 +437,61 @@ userRouter.put('/:id', requireAuth, requirePermission('admin.manage_users'), (re
     data: { ...updated, passwordHash: undefined },
   });
 });
+
+// Delete staff user account
+userRouter.delete(
+  '/:id',
+  requireAuth,
+  requirePermission('admin.manage_users'),
+  (req: AuthenticatedRequest, res: Response) => {
+    const targetUserId = req.params.id;
+    const targetUser = serverStore.getUserById(targetUserId);
+
+    if (!targetUser) {
+      res.status(404).json({ success: false, message: 'Staff user not found.' });
+      return;
+    }
+
+    // Enforce self-deletion prevention
+    if (req.user?.id === targetUser.id) {
+      res.status(403).json({
+        success: false,
+        message: 'Institutional security policy: You cannot delete your own administrative account.',
+      });
+      return;
+    }
+
+    const { reason } = req.body || {};
+
+    const result = serverStore.deleteUser(targetUserId);
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    AuditService.log({
+      userId: req.user!.id,
+      username: req.user!.username,
+      userFullName: req.user!.fullName,
+      branchId: req.workingBranch!.id,
+      branchName: req.workingBranch!.name,
+      action: 'USER_DELETED',
+      recordType: 'USERS',
+      recordId: targetUser.id,
+      previousValue: JSON.stringify({
+        id: targetUser.id,
+        username: targetUser.username,
+        fullName: targetUser.fullName,
+        roleName: targetUser.roleName,
+        branchId: targetUser.primaryBranchId,
+      }),
+      newValue: 'ACCOUNT_DELETED',
+      reason: reason || `Staff account for ${targetUser.fullName} (@${targetUser.username}) deleted by administrator`,
+    });
+
+    res.json(result);
+  }
+);
 
 // Modify user permissions / rights / branch assignment
 // CRITICAL SECURITY RULE: Ordinary users CANNOT modify their own permissions!

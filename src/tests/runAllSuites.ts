@@ -18,8 +18,11 @@ import { Phase9ProductionTestRunner } from './phase9ProductionReadiness.test';
 import { MemberAdminPermissionsTestRunner } from './memberAdminPermissions.test';
 import { runRecordPropagationTests } from './recordPropagationAcrossSystem.test';
 import { runLiveAudit } from './liveAuditSuite';
+import { runAfricasTalkingSuite } from './africasTalkingDeliveryPipeline.test';
+import { serverStore } from '../server/storage/serverStore';
 
 async function main() {
+  process.env.SEED_TEST_DATA = 'true';
   console.log('\n================================================================');
   console.log('   TURIHAMWE MANAGEMENT SYSTEM — COMPREHENSIVE TEST SUITE');
   console.log('   Organization: Nyamuyanja SACCO Ltd, Uganda');
@@ -179,6 +182,23 @@ async function main() {
     hasAnyFailure = true;
   }
   console.log('');
+
+  // 9. Africa's Talking SMS Delivery Pipeline Verification Suite
+  try {
+    const atResult = await runAfricasTalkingSuite();
+    grandTotal += atResult.results.length;
+    grandPassed += atResult.results.filter(r => r.passed).length;
+    grandFailed += atResult.results.filter(r => !r.passed).length;
+    if (!atResult.passed) {
+      hasAnyFailure = true;
+    }
+  } catch (err: any) {
+    console.error("Africa's Talking suite execution error:", err.message);
+    hasAnyFailure = true;
+  }
+  // Reset SEED_TEST_DATA and purge test fixtures so operational database remains clean for production
+  delete process.env.SEED_TEST_DATA;
+  serverStore.clearAllOperationalData('usr-it-01', 'itadm');
 
   console.log('================================================================');
   console.log(`GRAND TOTAL: ${grandTotal} TESTS | PASSED: ${grandPassed} | FAILED: ${grandFailed}`);

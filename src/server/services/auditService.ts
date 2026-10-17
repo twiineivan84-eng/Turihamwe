@@ -19,6 +19,15 @@ export interface RecordAuditParams {
   isSynced?: boolean;
 }
 
+function sanitizeAuditPayload(val?: string): string | undefined {
+  if (!val) return val;
+  // Redact bcrypt hashes ($2a$, $2b$, $2y$)
+  let sanitized = val.replace(/\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}/g, '[REDACTED_PASSWORD_HASH]');
+  // Redact passwords, secrets, tokens in JSON or plaintext
+  sanitized = sanitized.replace(/"(password|passwordHash|secret|token|apiKey)":\s*"[^"]*"/gi, '"$1":"[REDACTED]"');
+  return sanitized;
+}
+
 export class AuditService {
   public static log(params: RecordAuditParams): AuditLog {
     const logEntry: AuditLog = {
@@ -32,9 +41,9 @@ export class AuditService {
       action: params.action,
       recordType: params.recordType,
       recordId: params.recordId,
-      previousValue: params.previousValue,
-      newValue: params.newValue,
-      reason: params.reason,
+      previousValue: sanitizeAuditPayload(params.previousValue),
+      newValue: sanitizeAuditPayload(params.newValue),
+      reason: sanitizeAuditPayload(params.reason),
       ipAddress: params.ipAddress,
       userAgent: params.userAgent,
       isSynced: params.isSynced ?? true,

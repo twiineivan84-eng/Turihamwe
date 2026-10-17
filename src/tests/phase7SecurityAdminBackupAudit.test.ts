@@ -677,6 +677,167 @@ export class Phase7TestRunner {
       results.push({ id: 18, requirement: 'Req 1', name: 'User Audit History', passed: false, message: err.message });
     }
 
+    // ==========================================
+    // TEST 19: STAFF USERNAME & PASSWORD UPDATE BY ADMINISTRATOR
+    // ==========================================
+    try {
+      const initialUser: User = {
+        id: `usr-test-mod-${Date.now()}`,
+        username: 'u4455',
+        fullName: 'Initial Staff Member',
+        email: 'staff.init@nyamuyanja.ug',
+        phone: '+256701999888',
+        passwordHash: await bcrypt.hash('Staff@Init2026', 10),
+        roleId: serverStore.getRoles().find(r => r.code === 'TELLER')!.id,
+        roleName: 'Cashier / Teller',
+        primaryBranchId: primaryBranch.id,
+        allowedBranchIds: [primaryBranch.id],
+        hasMultiBranchAccess: false,
+        isActive: true,
+        requiresPasswordReset: false,
+        directPermissions: [],
+        revokedPermissions: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      serverStore.addUser(initialUser);
+
+      // 1. Admin updates username to 'u6677' and password to 'NewP@ssword2026'
+      const newHash = await bcrypt.hash('NewP@ssword2026', 10);
+      const updatedUser = serverStore.updateUser(initialUser.id, {
+        username: 'u6677',
+        passwordHash: newHash,
+        fullName: 'Updated Staff Member',
+      });
+
+      // 2. Verify login with updated username and new password
+      const newLogin = await AuthService.login({
+        username: 'u6677',
+        password: 'NewP@ssword2026',
+        branchId: primaryBranch.id,
+      });
+
+      // 3. Verify old username no longer logs in
+      const oldLogin = await AuthService.login({
+        username: 'u4455',
+        password: 'NewP@ssword2026',
+        branchId: primaryBranch.id,
+      });
+
+      const passed =
+        updatedUser !== undefined &&
+        updatedUser.username === 'u6677' &&
+        newLogin.success &&
+        !oldLogin.success;
+
+      results.push({
+        id: 19,
+        requirement: 'Requirement 1: User Administration',
+        name: 'Staff Username & Password Administrative Modification',
+        passed,
+        message: passed
+          ? 'Authorized administrator can modify staff username and credentials; authentication immediately reflects new username and password'
+          : 'Staff username/password modification failed',
+      });
+    } catch (err: any) {
+      results.push({ id: 19, requirement: 'Req 1', name: 'Staff Username & Password Update', passed: false, message: err.message });
+    }
+
+    // ==========================================
+    // TEST 20: STAFF ACCOUNT DELETION & ROOT ACCOUNT PROTECTION
+    // ==========================================
+    try {
+      const deleteCandidateId = `usr-test-del-${Date.now()}`;
+      serverStore.addUser({
+        id: deleteCandidateId,
+        username: 'udel1',
+        fullName: 'Departed Staff',
+        passwordHash: await bcrypt.hash('Password123', 10),
+        roleId: serverStore.getRoles()[0].id,
+        roleName: serverStore.getRoles()[0].name,
+        primaryBranchId: primaryBranch.id,
+        allowedBranchIds: [primaryBranch.id],
+        hasMultiBranchAccess: false,
+        isActive: true,
+        requiresPasswordReset: false,
+        directPermissions: [],
+        revokedPermissions: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // 1. Delete candidate user
+      const delResult = serverStore.deleteUser(deleteCandidateId);
+      const userGone = !serverStore.getUserById(deleteCandidateId);
+
+      // 2. Attempt deleting root administrator 'ivan' - must be strictly rejected
+      const ivanUser = serverStore.getUserByUsername('ivan');
+      let ivanProtected = false;
+      if (ivanUser) {
+        const rootDelAttempt = serverStore.deleteUser(ivanUser.id);
+        ivanProtected = !rootDelAttempt.success && !!serverStore.getUserById(ivanUser.id);
+      }
+
+      const passed = delResult.success && userGone && ivanProtected;
+
+      results.push({
+        id: 20,
+        requirement: 'Requirement 1: User Administration',
+        name: 'Staff Account Deletion with Root Administrator Protection',
+        passed,
+        message: passed
+          ? 'Staff accounts can be deleted cleanly while root IT administrator (ivan) is permanently protected from deletion'
+          : 'Staff account deletion / protection test failed',
+      });
+    } catch (err: any) {
+      results.push({ id: 20, requirement: 'Req 1', name: 'Staff Account Deletion', passed: false, message: err.message });
+    }
+
+    // ==========================================
+    // TEST 21: PRODUCTION DATA SANITIZATION & TEST PURGE
+    // ==========================================
+    try {
+      // Execute operational data purge
+      const purgeResults = serverStore.clearAllOperationalData('usr-it-01', 'itadm');
+
+      // Verify that system settings, branches, roles, templates, and authentic users are preserved
+      const branchesRemaining = serverStore.getBranches().length;
+      const rolesRemaining = serverStore.getRoles().length;
+      const templatesRemaining = serverStore.getSmsTemplates().length;
+      const settings = serverStore.getSystemSettings();
+      const ivanExists = !!serverStore.getUserByUsername('ivan');
+      const itadmExists = !!serverStore.getUserByUsername('itadm');
+
+      // Verify operational tables are cleared
+      const membersCount = serverStore.getMembers({ includeDeleted: true }).length;
+      const plansCount = serverStore.getPlans().length;
+      const claimsCount = serverStore.getClaims().length;
+
+      const passed =
+        branchesRemaining === 6 &&
+        rolesRemaining >= 6 &&
+        templatesRemaining >= 9 &&
+        settings['deployment.ready'] === 'true' &&
+        settings['sms.provider'] === 'AFRICAS_TALKING' &&
+        ivanExists &&
+        itadmExists &&
+        membersCount === 0 &&
+        plansCount === 0 &&
+        claimsCount === 0;
+
+      results.push({
+        id: 21,
+        requirement: 'Requirement 14: System Configuration',
+        name: 'Operational Data Purge & Configuration Integrity Preservation',
+        passed,
+        message: passed
+          ? `Sanitization purged demo/test records while strictly preserving 6 SACCO branches, system roles, SMS gateway config, and administrative accounts`
+          : 'Data sanitization failed',
+      });
+    } catch (err: any) {
+      results.push({ id: 21, requirement: 'Req 14', name: 'Data Sanitization', passed: false, message: err.message });
+    }
+
     return results;
   }
 }

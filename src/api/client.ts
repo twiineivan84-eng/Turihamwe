@@ -24,7 +24,8 @@ import {
   BackupConfig,
   SystemHealthMetrics,
   UserAuditHistory,
-  BusinessRulesConfig
+  BusinessRulesConfig,
+  SmsProviderDiagnostics
 } from '../types';
 
 const API_BASE = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL || '/api';
@@ -332,10 +333,17 @@ class ApiClient {
     });
   }
 
-  public async editUser(userId: string, updates: Partial<User>): Promise<{ success: boolean; data: User }> {
+  public async editUser(userId: string, updates: Partial<User> & { password?: string }): Promise<{ success: boolean; data: User }> {
     return this.request(`/users/${userId}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
+    });
+  }
+
+  public async deleteUser(userId: string, reason?: string): Promise<{ success: boolean; message: string; deletedUser?: User }> {
+    return this.request(`/users/${userId}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason }),
     });
   }
 
@@ -512,6 +520,57 @@ class ApiClient {
 
   public async retrySyncRecord(id: string): Promise<{ success: boolean; record?: unknown; message?: string }> {
     return this.request(`/system/sync-retry/${encodeURIComponent(id)}`, {
+      method: 'POST',
+    });
+  }
+
+  public async getEnvironmentStatus(): Promise<{
+    success: boolean;
+    data: {
+      allConfigured: boolean;
+      readyToContinue: boolean;
+      totalCount: number;
+      configuredCount: number;
+      variables: Array<{
+        key: string;
+        category: string;
+        description: string;
+        required: boolean;
+        secret: boolean;
+        defaultValue: string;
+        currentValue: string;
+        isSet: boolean;
+        status: string;
+      }>;
+      summaryMessage: string;
+    };
+  }> {
+    return this.request('/system/environment');
+  }
+
+  public async autoFillEnvironment(): Promise<{
+    success: boolean;
+    message: string;
+    readyToContinue: boolean;
+  }> {
+    return this.request('/system/environment/autofill', {
+      method: 'POST',
+    });
+  }
+
+  public async clearAllOperationalData(): Promise<{
+    success: boolean;
+    data: {
+      clearedMembers: number;
+      clearedPlans: number;
+      clearedClaims: number;
+      clearedContributions: number;
+      clearedRenewals: number;
+      clearedBackups: number;
+    };
+    message: string;
+  }> {
+    return this.request('/system/clear-data', {
       method: 'POST',
     });
   }
@@ -883,6 +942,65 @@ class ApiClient {
     message: string;
   }> {
     return this.request('/sms/process-queue', {
+      method: 'POST',
+    });
+  }
+
+  public async getSmsDiagnostics(): Promise<{
+    success: boolean;
+    data: SmsProviderDiagnostics;
+  }> {
+    return this.request('/sms/diagnostics');
+  }
+
+  public async testSmsConnection(): Promise<{
+    success: boolean;
+    data: {
+      connected: boolean;
+      environment: 'SANDBOX' | 'PRODUCTION';
+      balanceUGX?: string | null;
+      message: string;
+      error?: string;
+      checkedAt: string;
+    };
+    message: string;
+  }> {
+    return this.request('/sms/test-connection', {
+      method: 'POST',
+    });
+  }
+
+  public async testSmsSend(data: {
+    recipientPhone: string;
+    confirmSandboxTest: boolean;
+  }): Promise<{
+    success: boolean;
+    data?: SmsMessage;
+    message: string;
+    error?: string;
+  }> {
+    return this.request('/sms/test-send', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async startSmsWorker(): Promise<{
+    success: boolean;
+    message: string;
+    workerStatus: string;
+  }> {
+    return this.request('/sms/worker/start', {
+      method: 'POST',
+    });
+  }
+
+  public async stopSmsWorker(): Promise<{
+    success: boolean;
+    message: string;
+    workerStatus: string;
+  }> {
+    return this.request('/sms/worker/stop', {
       method: 'POST',
     });
   }

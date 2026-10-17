@@ -20,6 +20,8 @@ import {
   History,
   Trash2,
   Eye,
+  EyeOff,
+  Sparkles,
   ShieldAlert,
   ChevronRight,
   Filter,
@@ -88,14 +90,24 @@ export const UsersAndRightsView: React.FC = () => {
 
   // Edit user profile state
   const [editFullName, setEditFullName] = useState<string>('');
+  const [editUsername, setEditUsername] = useState<string>('');
   const [editEmail, setEditEmail] = useState<string>('');
   const [editPhone, setEditPhone] = useState<string>('');
   const [editPrimaryBranchId, setEditPrimaryBranchId] = useState<string>('');
+  const [editPassword, setEditPassword] = useState<string>('');
+  const [showEditPassword, setShowEditPassword] = useState<boolean>(false);
   const [isSubmittingEdit, setIsSubmittingEdit] = useState<boolean>(false);
+  const [editUserError, setEditUserError] = useState<string>('');
 
   // Password reset state
   const [adminResetNewPassword, setAdminResetNewPassword] = useState<string>('');
+  const [showAdminResetPassword, setShowAdminResetPassword] = useState<boolean>(false);
   const [isResettingPassword, setIsResettingPassword] = useState<boolean>(false);
+
+  // Delete user state
+  const [deletingUser, setDeletingUser] = useState<User | null>(null);
+  const [deleteReason, setDeleteReason] = useState<string>('');
+  const [isDeletingUser, setIsDeletingUser] = useState<boolean>(false);
 
   // Self password change state
   const [ownCurrentPassword, setOwnCurrentPassword] = useState<string>('');
@@ -251,36 +263,96 @@ export const UsersAndRightsView: React.FC = () => {
   const openEditUser = (user: User) => {
     setEditingUser(user);
     setEditFullName(user.fullName);
+    setEditUsername(user.username);
     setEditEmail(user.email || '');
     setEditPhone(user.phone || '');
     setEditPrimaryBranchId(user.primaryBranchId);
+    setEditPassword('');
+    setShowEditPassword(false);
+    setEditUserError('');
   };
 
   const handleSaveEditUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
+    setEditUserError('');
+
+    const cleanUsername = editUsername.trim().toLowerCase();
+    if (cleanUsername.length < 4 || cleanUsername.length > 6) {
+      setEditUserError('Username must be strictly between 4 and 6 characters.');
+      return;
+    }
+    if (!/^[a-z0-9_]+$/.test(cleanUsername)) {
+      setEditUserError('Username may only contain lowercase letters, numbers, and underscores.');
+      return;
+    }
+
+    if (editPassword && editPassword.length < 8) {
+      setEditUserError('If changing password, it must be at least 8 characters long.');
+      return;
+    }
+
     setIsSubmittingEdit(true);
     try {
-      const res = await apiClient.editUser(editingUser.id, {
+      const payload: {
+        fullName: string;
+        username: string;
+        email: string;
+        phone: string;
+        primaryBranchId: string;
+        password?: string;
+      } = {
         fullName: editFullName.trim(),
+        username: cleanUsername,
         email: editEmail.trim(),
         phone: editPhone.trim(),
         primaryBranchId: editPrimaryBranchId,
-      });
+      };
+
+      if (editPassword && editPassword.trim().length > 0) {
+        payload.password = editPassword.trim();
+      }
+
+      const res = await apiClient.editUser(editingUser.id, payload);
 
       if (res.success) {
         setUsers(prev => prev.map(u => (u.id === editingUser.id ? res.data : u)));
         setEditingUser(null);
         setNotification({
           type: 'success',
-          message: `Profile details for @${editingUser.username} updated successfully.`,
+          message: `Profile details for @${res.data.username} updated successfully.`,
         });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error updating profile';
+      setEditUserError(msg);
       setNotification({ type: 'error', message: msg });
     } finally {
       setIsSubmittingEdit(false);
+    }
+  };
+
+  // Delete User Handler
+  const handleDeleteUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deletingUser) return;
+    setIsDeletingUser(true);
+    try {
+      const res = await apiClient.deleteUser(deletingUser.id, deleteReason.trim());
+      if (res.success) {
+        setUsers(prev => prev.filter(u => u.id !== deletingUser.id));
+        setNotification({
+          type: 'success',
+          message: res.message || `Staff account @${deletingUser.username} successfully deleted.`,
+        });
+        setDeletingUser(null);
+        setDeleteReason('');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete staff account';
+      setNotification({ type: 'error', message: msg });
+    } finally {
+      setIsDeletingUser(false);
     }
   };
 
@@ -795,11 +867,30 @@ export const UsersAndRightsView: React.FC = () => {
                                 onClick={() => handleToggleUserStatus(user)}
                                 className={`text-[10px] font-semibold px-2 py-0.5 rounded transition ${
                                   user.isActive
-                                    ? 'text-red-700 hover:bg-red-50 border border-red-200'
+                                    ? 'text-amber-700 hover:bg-amber-50 border border-amber-200'
                                     : 'text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
                                 }`}
                               >
                                 {user.isActive ? 'Disable' : 'Enable'}
+                              </button>
+                            )}
+
+                            {/* Delete Staff Account */}
+                            {canManageUsers && !isSelf && (
+                              <button
+                                onClick={() => {
+                                  setDeletingUser(user);
+                                  setDeleteReason('');
+                                }}
+                                disabled={user.username.toLowerCase() === 'ivan'}
+                                title={user.username.toLowerCase() === 'ivan' ? 'Root IT Administrator cannot be deleted' : 'Delete staff account'}
+                                className={`p-1 rounded transition ${
+                                  user.username.toLowerCase() === 'ivan'
+                                    ? 'text-slate-300 cursor-not-allowed'
+                                    : 'text-slate-400 hover:text-red-600 hover:bg-red-50'
+                                }`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </div>
@@ -1403,8 +1494,8 @@ export const UsersAndRightsView: React.FC = () => {
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full border border-slate-200 overflow-hidden">
             <div className="bg-slate-50 text-slate-900 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Edit Profile: @{editingUser.username}</h3>
-                <p className="text-[11px] text-slate-500">Update staff contact and branch assignment</p>
+                <h3 className="text-sm font-bold text-slate-900">Edit Staff Account: @{editingUser.username}</h3>
+                <p className="text-[11px] text-slate-500">Update username, staff credentials, contact details, and branch</p>
               </div>
               <button onClick={() => setEditingUser(null)} className="text-slate-400 hover:text-slate-700">
                 <X className="w-5 h-5" />
@@ -1412,6 +1503,29 @@ export const UsersAndRightsView: React.FC = () => {
             </div>
 
             <form onSubmit={handleSaveEditUser} className="p-6 space-y-4 text-xs">
+              {editUserError && (
+                <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                  <span>{editUserError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Username * <span className="text-slate-400 font-normal">(4–6 chars, lowercase alphanumeric)</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  minLength={4}
+                  maxLength={6}
+                  value={editUsername}
+                  onChange={e => setEditUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  className="w-full py-1.5 px-3 border border-slate-300 rounded-lg bg-white text-slate-900 font-mono"
+                />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">Used for staff login. Strictly 4 to 6 characters.</span>
+              </div>
+
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Full Legal Name *</label>
                 <input
@@ -1458,6 +1572,28 @@ export const UsersAndRightsView: React.FC = () => {
                 </select>
               </div>
 
+              <div className="pt-2 border-t border-slate-100">
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Change Password <span className="text-slate-400 font-normal">(Optional, min 8 characters)</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showEditPassword ? 'text' : 'password'}
+                    value={editPassword}
+                    onChange={e => setEditPassword(e.target.value)}
+                    placeholder="Leave blank to keep existing password"
+                    className="w-full py-1.5 pl-3 pr-9 border border-slate-300 rounded-lg bg-white text-slate-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowEditPassword(!showEditPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showEditPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
               <div className="flex justify-end gap-2 pt-3 border-t">
                 <button
                   type="button"
@@ -1499,18 +1635,45 @@ export const UsersAndRightsView: React.FC = () => {
             <form onSubmit={handleAdminResetPassword} className="p-6 space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">New Temporary Password *</label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={adminResetNewPassword}
-                  onChange={e => setAdminResetNewPassword(e.target.value)}
-                  placeholder="Min 8 characters"
-                  className="w-full py-1.5 px-3 border border-slate-300 rounded-lg bg-white text-slate-900"
-                />
-                <span className="text-[11px] text-slate-500 mt-1 block">
-                  User will be marked with password reset flag.
-                </span>
+                <div className="relative">
+                  <input
+                    type={showAdminResetPassword ? 'text' : 'password'}
+                    required
+                    minLength={8}
+                    value={adminResetNewPassword}
+                    onChange={e => setAdminResetNewPassword(e.target.value)}
+                    placeholder="Min 8 characters"
+                    className="w-full py-1.5 pl-3 pr-9 border border-slate-300 rounded-lg bg-white text-slate-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminResetPassword(!showAdminResetPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showAdminResetPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between mt-1.5">
+                  <span className="text-[10px] text-slate-500">Min 8 characters. Marked for reset.</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const randArray = new Uint32Array(1);
+                      if (typeof window !== 'undefined' && window.crypto) {
+                        window.crypto.getRandomValues(randArray);
+                      } else {
+                        randArray[0] = Math.floor(Math.random() * 1000000);
+                      }
+                      const randDigits = 1000 + (randArray[0] % 9000);
+                      setAdminResetNewPassword(`Staff@${randDigits}!`);
+                      setShowAdminResetPassword(true);
+                    }}
+                    className="text-[11px] text-blue-700 hover:text-blue-900 font-medium flex items-center gap-1"
+                  >
+                    <Sparkles className="w-3 h-3 text-blue-600" />
+                    Auto-generate
+                  </button>
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t">
@@ -1528,6 +1691,89 @@ export const UsersAndRightsView: React.FC = () => {
                 >
                   {isResettingPassword && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                   Confirm Reset
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: DELETE STAFF ACCOUNT                               */}
+      {/* ========================================================= */}
+      {deletingUser && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full border border-red-200 overflow-hidden">
+            <div className="bg-red-50 text-red-900 border-b border-red-100 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-red-100 border border-red-200 flex items-center justify-center text-red-700">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-red-900">Delete Staff Account</h3>
+                  <p className="text-[11px] text-red-600">Irreversible user account de-provisioning</p>
+                </div>
+              </div>
+              <button onClick={() => setDeletingUser(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleDeleteUser} className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Staff Member:</span>
+                  <span className="font-semibold text-slate-900">{deletingUser.fullName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Username:</span>
+                  <span className="font-mono text-slate-800 font-semibold">@{deletingUser.username}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Role:</span>
+                  <span className="text-slate-800">{deletingUser.roleName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Branch:</span>
+                  <span className="text-slate-800">
+                    {branches.find(b => b.id === deletingUser.primaryBranchId)?.name || deletingUser.primaryBranchId}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] leading-relaxed">
+                <span className="font-bold block mb-0.5">Notice on Statutory Audit Preservation:</span>
+                Deleting this staff account permanently revokes application access. However, all immutable historical audit trail logs, transactions, and documents authored by this staff member will remain preserved in accordance with SACCO regulatory policy.
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Reason for Account Deletion <span className="text-slate-400 font-normal">(Recorded in central audit trail)</span>
+                </label>
+                <textarea
+                  rows={2}
+                  value={deleteReason}
+                  onChange={e => setDeleteReason(e.target.value)}
+                  placeholder="e.g., Staff departure from organization, user role retired"
+                  className="w-full py-1.5 px-3 border border-slate-300 rounded-lg bg-white text-slate-900 text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setDeletingUser(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDeletingUser}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5"
+                >
+                  {isDeletingUser && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  Confirm Permanent Deletion
                 </button>
               </div>
             </form>

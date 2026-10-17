@@ -104,7 +104,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
 
   // Permissions checks
   const canView = hasPermission('members.view');
-  const canRegister = hasPermission('members.register');
+  const canRegister = hasPermission('members.register') || user?.roleCode === 'IT_OFFICER' || user?.roleCode === 'GM';
   const canEdit = hasPermission('members.edit');
   const canDelete = hasPermission('members.delete');
   const canSearch = hasPermission('members.search') || hasPermission('members.view');

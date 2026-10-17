@@ -127,6 +127,7 @@ export interface User {
   passwordHash?: string;
   roleId: string;
   roleName?: string;
+  roleCode?: string;
   primaryBranchId: string;
   allowedBranchIds: string[]; // for multi-branch users
   hasMultiBranchAccess: boolean;
@@ -184,6 +185,7 @@ export type AuditAction =
   | 'DUPLICATE_CLAIM_OVERRIDDEN'
   | 'USER_CREATED'
   | 'USER_UPDATED'
+  | 'USER_DELETED'
   | 'USER_ENABLED'
   | 'USER_DISABLED'
   | 'PASSWORD_CHANGED'
@@ -212,6 +214,8 @@ export type AuditAction =
   | 'SMS_SENT'
   | 'SMS_FAILED'
   | 'SMS_RETRIED'
+  | 'SMS_DELIVERY_CONFIRMED'
+  | 'SMS_DELIVERY_FAILED'
   | 'SMS_TEMPLATE_CREATED'
   | 'SMS_TEMPLATE_UPDATED'
   | 'ALERT_CREATED'
@@ -730,6 +734,58 @@ export interface SmsMessage {
   createdAt: string;
   updatedAt: string;
   isSynced?: boolean;
+  lastAttemptAt?: string;
+  nextRetryAt?: string;
+  lockedAt?: string;
+  lockedBy?: string;
+  deliveryConfirmed?: boolean;
+  deliveryReceiptAt?: string;
+  deliveryReceiptNetworkCode?: string;
+  deliveryReceiptRawStatus?: string;
+}
+
+export type SmsDeliveryStatus =
+  | 'Pending'
+  | 'Submitted'
+  | 'Buffered'
+  | 'Delivered'
+  | 'Failed'
+  | 'Rejected'
+  | 'AbsentSubscriber'
+  | 'Expired'
+  | 'SimulatedSandbox'
+  | 'Unknown';
+
+export type SmsConfigurationStatus = 'CONFIGURED' | 'MISSING' | 'INVALID' | 'DISABLED';
+export type SmsWorkerStatus = 'RUNNING' | 'STOPPED' | 'PAUSED';
+
+export interface SmsProviderDiagnostics {
+  provider: "Africa's Talking";
+  environment: 'SANDBOX' | 'PRODUCTION';
+  configurationStatus: SmsConfigurationStatus;
+  configurationMessage: string;
+  workerStatus: SmsWorkerStatus;
+  workerIntervalSeconds: number;
+  isSubmissionEnabled: boolean;
+  senderId: string;
+  hasApiKey: boolean;
+  isPlaceholderKey: boolean;
+  counts: {
+    total: number;
+    pending: number;
+    sending: number;
+    sent: number;
+    deliveredConfirmed: number;
+    failed: number;
+    retrying: number;
+  };
+  lastSuccessfulSubmissionTime?: string;
+  lastSubmissionAttemptTime?: string;
+  lastErrorSanitized?: string;
+  lastErrorTime?: string;
+  balanceEstimateUGX?: string | null;
+  sandboxNotice?: string;
+  deliveryReceiptsSupported: boolean;
 }
 
 export type NotificationEventType =
