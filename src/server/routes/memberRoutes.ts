@@ -3,6 +3,7 @@ import { requireAuth, requirePermission, AuthenticatedRequest } from '../middlew
 import { serverStore } from '../storage/serverStore';
 import { SaccoMember, ControlledCorrection } from '../../types';
 import { AuditService } from '../services/auditService';
+import { isWithinUgandaFiveDaysWindow } from '../../utils/timezone';
 
 export const memberRouter = Router();
 
@@ -17,10 +18,7 @@ function isValidEmail(email: string): boolean {
 }
 
 function isWithinFiveDays(registrationDate: string): boolean {
-  const reg = new Date(registrationDate.substring(0, 10)).getTime();
-  const today = new Date(new Date().toISOString().substring(0, 10)).getTime();
-  const diffDays = Math.round((today - reg) / (1000 * 60 * 60 * 24));
-  return diffDays <= 5;
+  return isWithinUgandaFiveDaysWindow(registrationDate);
 }
 
 /**

@@ -225,14 +225,22 @@ export class SeedService {
       }
     }
 
-    // Seed any remaining development users without duplicates
-    for (const u of devSeedUsers) {
-      if (u.username !== 'ivan' && !serverStore.getUserByUsername(u.username)) {
-        serverStore.addUser(u);
+    const isDeploymentReady = serverStore.getSystemSettings()['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true';
+
+    // Only seed dev users if the system is NOT marked deployment-ready AND user accounts have not already been initialized.
+    // Crucially: NEVER re-seed any account that was explicitly deleted by an administrator.
+    if (!isDeploymentReady && serverStore.getUsers().length <= 1) {
+      for (const u of devSeedUsers) {
+        if (
+          u.username !== 'ivan' &&
+          !serverStore.getUserByUsername(u.username) &&
+          !serverStore.isUserDeleted(u.username) &&
+          !serverStore.isUserDeleted(u.id)
+        ) {
+          serverStore.addUser(u);
+        }
       }
     }
-
-    const isDeploymentReady = serverStore.getSystemSettings()['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true';
 
     if (!isDeploymentReady) {
       // Ensure essential SACCO members exist

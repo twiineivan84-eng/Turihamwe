@@ -221,11 +221,11 @@ userRouter.post('/', requireAuth, requirePermission('admin.manage_users'), async
       allowedBranchIds,
     } = req.body;
 
-    // Validate username rules (strictly 4 to 6 chars)
-    if (!username || username.trim().length < 4 || username.trim().length > 6) {
+    // Validate username rules (strictly 4 to 10 chars)
+    if (!username || username.trim().length < 4 || username.trim().length > 10) {
       res.status(400).json({
         success: false,
-        message: 'Username must be strictly between 4 and 6 characters.',
+        message: 'Username must be strictly between 4 and 10 characters.',
       });
       return;
     }
@@ -355,10 +355,10 @@ userRouter.put('/:id', requireAuth, requirePermission('admin.manage_users'), asy
   // Username validation if updated
   if (username && username.trim().toLowerCase() !== targetUser.username.toLowerCase()) {
     const cleanUsername = username.trim().toLowerCase();
-    if (cleanUsername.length < 4 || cleanUsername.length > 6) {
+    if (cleanUsername.length < 4 || cleanUsername.length > 10) {
       res.status(400).json({
         success: false,
-        message: 'Username must be strictly between 4 and 6 characters.',
+        message: 'Username must be strictly between 4 and 10 characters.',
       });
       return;
     }

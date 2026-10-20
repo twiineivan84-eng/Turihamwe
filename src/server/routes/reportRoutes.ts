@@ -3,6 +3,7 @@ import { requireAuth, requirePermission, AuthenticatedRequest } from '../middlew
 import { serverStore } from '../storage/serverStore';
 import { AuditService } from '../services/auditService';
 import { ReportCategory, ReportGenerationLog } from '../../types';
+import { getUgandaDateString, getUgandaYearMonth } from '../../utils/timezone';
 
 export const reportRouter = Router();
 
@@ -20,9 +21,9 @@ reportRouter.get('/summary', requirePermission('reports.view'), (req: Authentica
     branchId = workingBranch.id;
   }
 
-  const now = new Date();
-  const year = req.query.year ? parseInt(req.query.year as string, 10) : now.getFullYear();
-  const month = req.query.month ? parseInt(req.query.month as string, 10) : now.getMonth() + 1;
+  const currentUgandaYm = getUgandaYearMonth();
+  const year = req.query.year ? parseInt(req.query.year as string, 10) : currentUgandaYm.year;
+  const month = req.query.month ? parseInt(req.query.month as string, 10) : currentUgandaYm.month;
 
   const canViewFinancial = Boolean(
     req.effectivePermissions?.includes('reports.view_financial') ||
@@ -226,8 +227,7 @@ reportRouter.get('/data', requirePermission('reports.view'), (req: Authenticated
     case 'PERFORMANCE': {
       reportTitle = 'Monthly Branch Operational Performance Matrix';
       const branches = serverStore.getBranches();
-      const currentYear = new Date().getFullYear();
-      const currentMonth = new Date().getMonth() + 1;
+      const { year: currentYear, month: currentMonth } = getUgandaYearMonth();
 
       dataset = branches.map(b => {
         const s = serverStore.getMonthlyBranchSummary({
@@ -261,8 +261,8 @@ reportRouter.get('/data', requirePermission('reports.view'), (req: Authenticated
         branchId: branchId || undefined,
         limit: 200,
       });
-      if (startDate) logs = logs.filter(l => l.timestamp.substring(0, 10) >= startDate);
-      if (endDate) logs = logs.filter(l => l.timestamp.substring(0, 10) <= endDate);
+      if (startDate) logs = logs.filter(l => getUgandaDateString(l.timestamp) >= startDate);
+      if (endDate) logs = logs.filter(l => getUgandaDateString(l.timestamp) <= endDate);
 
       dataset = logs.map(l => ({
         timestamp: l.timestamp,

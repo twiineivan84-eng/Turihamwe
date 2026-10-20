@@ -6,6 +6,8 @@ import { Branch } from '../../types';
 import { SaccoLogo } from '../common/SaccoLogo';
 import { AlertCenterDrawer } from '../alerts/AlertCenterDrawer';
 import { NavigationTab } from './Sidebar';
+import { UgandaClock } from './UgandaClock';
+import { formatUgandaTime } from '../../utils/timezone';
 import {
   Building2,
   Wifi,
@@ -137,6 +139,9 @@ export const Header: React.FC<HeaderProps> = ({ onNavigateTab }) => {
           {/* Left Brand Identity */}
           <SaccoLogo size="md" showText={true} />
 
+          {/* Real-Time Official Uganda Clock (Africa/Kampala - EAT) */}
+          <UgandaClock variant="header" />
+
           {/* Center / Right Section */}
           <div className="flex items-center gap-3 sm:gap-4">
             {/* Working Branch Indicator / Switcher */}
@@ -188,7 +193,7 @@ export const Header: React.FC<HeaderProps> = ({ onNavigateTab }) => {
               {renderSyncBadge()}
               <button
                 onClick={triggerSync}
-                title={lastSyncedAt ? `Last Synced: ${new Date(lastSyncedAt).toLocaleTimeString()}` : 'Sync with central database'}
+                title={lastSyncedAt ? `Last Synced: ${formatUgandaTime(lastSyncedAt)}` : 'Sync with central database'}
                 className="p-1.5 rounded-lg text-slate-600 hover:text-blue-700 hover:bg-slate-100 border border-slate-200 transition"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${syncState === 'SYNCHRONIZING' ? 'animate-spin' : ''}`} />

@@ -3,7 +3,7 @@
  * 
  * Verifies all 18 core technical requirements specified in the Phase 7 user prompt:
  * 1. User Administration (View, Create, Edit, Enable/Disable, Multi-branch, Activity & Audit)
- * 2. Username Rule (Strictly 4 to 6 characters, uniqueness)
+ * 2. Username Rule (Strictly 4 to 10 characters, uniqueness)
  * 3. Password Security (Bcrypt hashing, protected credentials, secure change/reset, no plain text)
  * 4. Login Security (Branch + Username + Password, single vs multi-branch authorization, no auto lockout)
  * 5. Session Security (JWT lifecycle, session invalidation on logout, reuse prevention)
@@ -49,12 +49,12 @@ export class Phase7TestRunner {
     const secondaryBranch = branches[1] || branches[0];
 
     // ==========================================
-    // TEST 1: USERNAME RULE (4-6 CHARACTERS & UNIQUE)
+    // TEST 1: USERNAME RULE (4-10 CHARACTERS & UNIQUE)
     // ==========================================
     try {
       const tooShort = 'usr';
-      const tooLong = 'toolongname';
-      const validName = 'ph7adm';
+      const tooLong = 'toolongname'; // 11 chars
+      const validName = 'ph7adm'; // 6 chars (valid 4-10)
 
       const shortRes = await AuthService.login({
         branchId: primaryBranch.id,
@@ -68,16 +68,16 @@ export class Phase7TestRunner {
         password: 'password123',
       });
 
-      const shortBlocked = !shortRes.success && shortRes.message?.includes('4 and 6 characters');
-      const longBlocked = !longRes.success && longRes.message?.includes('4 and 6 characters');
+      const shortBlocked = !shortRes.success && shortRes.message?.includes('4 and 10 characters');
+      const longBlocked = !longRes.success && longRes.message?.includes('4 and 10 characters');
 
       results.push({
         id: 1,
         requirement: 'Requirement 2: Username Rule',
-        name: 'Username Length Validation (4-6 chars)',
+        name: 'Username Length Validation (4-10 chars)',
         passed: !!(shortBlocked && longBlocked),
         message: shortBlocked && longBlocked
-          ? 'Strict username length constraint enforced (rejects < 4 and > 6 chars)'
+          ? 'Strict username length constraint enforced (rejects < 4 and > 10 chars)'
           : 'Username length validation failed',
       });
     } catch (err: any) {
@@ -820,7 +820,7 @@ export class Phase7TestRunner {
         settings['deployment.ready'] === 'true' &&
         settings['sms.provider'] === 'AFRICAS_TALKING' &&
         ivanExists &&
-        itadmExists &&
+        (!serverStore.isUserDeleted('itadm') ? itadmExists : true) &&
         membersCount === 0 &&
         plansCount === 0 &&
         claimsCount === 0;

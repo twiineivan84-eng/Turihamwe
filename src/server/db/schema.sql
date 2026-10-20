@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     last_login_at TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT chk_username_length CHECK (char_length(username) >= 4 AND char_length(username) <= 6)
+    CONSTRAINT chk_username_length CHECK (char_length(username) >= 4 AND char_length(username) <= 10)
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);

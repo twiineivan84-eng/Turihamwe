@@ -18,6 +18,7 @@ import {
   SystemAlert,
   ReportGenerationLog
 } from '../../types';
+import { isWithinUgandaFiveDaysWindow } from '../../utils/timezone';
 
 export class LocalRepository {
   // --- Audit Trail ---
@@ -183,13 +184,10 @@ export class LocalRepository {
   }
 
   /**
-   * Helper: Check if member is within the 5-day normal editing window.
+   * Helper: Check if member is within the 5-day normal editing window using Uganda calendar.
    */
   public static isWithinFiveDaysWindow(registrationDate: string): boolean {
-    const regTime = new Date(registrationDate).getTime();
-    const now = Date.now();
-    const diffDays = (now - regTime) / (1000 * 60 * 60 * 24);
-    return diffDays <= 5;
+    return isWithinUgandaFiveDaysWindow(registrationDate);
   }
 
   // --- Turihamwe Plan Local Operations ---

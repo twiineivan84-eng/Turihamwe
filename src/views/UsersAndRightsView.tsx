@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiClient } from '../api/client';
 import { User, Role, PermissionDefinition, Branch, UserAuditHistory, PermissionCode } from '../types';
+import { formatUgandaDateTime } from '../utils/timezone';
 import {
   UserCog,
   Shield,
@@ -205,8 +206,8 @@ export const UsersAndRightsView: React.FC = () => {
     e.preventDefault();
     setNewUserError('');
 
-    if (newUsername.trim().length < 4 || newUsername.trim().length > 6) {
-      setNewUserError('Username rule: strictly between 4 and 6 characters.');
+    if (newUsername.trim().length < 4 || newUsername.trim().length > 10) {
+      setNewUserError('Username rule: strictly between 4 and 10 characters.');
       return;
     }
 
@@ -278,8 +279,8 @@ export const UsersAndRightsView: React.FC = () => {
     setEditUserError('');
 
     const cleanUsername = editUsername.trim().toLowerCase();
-    if (cleanUsername.length < 4 || cleanUsername.length > 6) {
-      setEditUserError('Username must be strictly between 4 and 6 characters.');
+    if (cleanUsername.length < 4 || cleanUsername.length > 10) {
+      setEditUserError('Username must be strictly between 4 and 10 characters.');
       return;
     }
     if (!/^[a-z0-9_]+$/.test(cleanUsername)) {
@@ -738,7 +739,7 @@ export const UsersAndRightsView: React.FC = () => {
             </div>
 
             <span className="text-xs text-slate-500 font-mono">
-              Username Rule: Strict 4–6 characters
+              Username Rule: Strict 4–10 characters
             </span>
           </div>
 
@@ -1324,7 +1325,7 @@ export const UsersAndRightsView: React.FC = () => {
             <div className="bg-slate-50 text-slate-900 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Provision New Staff User</h3>
-                <p className="text-[11px] text-slate-500">Strict 4–6 character username • Hashed password</p>
+                <p className="text-[11px] text-slate-500">Strict 4–10 character username • Hashed password</p>
               </div>
               <button
                 onClick={() => setShowNewUserModal(false)}
@@ -1345,13 +1346,13 @@ export const UsersAndRightsView: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Username (4–6 chars) *
+                    Username (4–10 chars) *
                   </label>
                   <input
                     type="text"
                     required
                     minLength={4}
-                    maxLength={6}
+                    maxLength={10}
                     value={newUsername}
                     onChange={e => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
                     placeholder="e.g. bmkag"
@@ -1512,18 +1513,18 @@ export const UsersAndRightsView: React.FC = () => {
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
-                  Username * <span className="text-slate-400 font-normal">(4–6 chars, lowercase alphanumeric)</span>
+                  Username * <span className="text-slate-400 font-normal">(4–10 chars, lowercase alphanumeric)</span>
                 </label>
                 <input
                   type="text"
                   required
                   minLength={4}
-                  maxLength={6}
+                  maxLength={10}
                   value={editUsername}
                   onChange={e => setEditUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
                   className="w-full py-1.5 px-3 border border-slate-300 rounded-lg bg-white text-slate-900 font-mono"
                 />
-                <span className="text-[10px] text-slate-500 mt-0.5 block">Used for staff login. Strictly 4 to 6 characters.</span>
+                <span className="text-[10px] text-slate-500 mt-0.5 block">Used for staff login. Strictly 4 to 10 characters.</span>
               </div>
 
               <div>
@@ -1921,7 +1922,7 @@ export const UsersAndRightsView: React.FC = () => {
                               {log.action}
                             </span>
                             <span className="text-[10px] text-slate-400 font-mono">
-                              {new Date(log.timestamp).toLocaleString()}
+                              {formatUgandaDateTime(log.timestamp)}
                             </span>
                           </div>
                           <div className="font-medium text-slate-800">{log.newValue || log.reason || 'Operational action'}</div>

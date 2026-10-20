@@ -1,6 +1,6 @@
 {
   "version": "1.0.0-phase7",
-  "exportedAt": "2026-10-15T07:43:08.237Z",
+  "exportedAt": "2026-10-19T15:39:10.360Z",
   "createdBy": {
     "userId": "usr-it-01",
     "username": "itadm",
@@ -158,6 +158,7 @@
           "alerts.view",
           "alerts.manage",
           "members.view",
+          "members.register",
           "members.edit",
           "members.delete",
           "members.search",
@@ -165,8 +166,7 @@
           "turihamwe.view",
           "turihamwe.view_history",
           "reports.view",
-          "reports.generate",
-          "members.register"
+          "reports.generate"
         ],
         "createdAt": "2026-01-01T00:00:00Z",
         "updatedAt": "2026-01-01T00:00:00Z"
@@ -747,7 +747,7 @@
         "fullName": "Ivan (IT Officer)",
         "email": "ivan.it@nyamuyanjasacco.ug",
         "phone": "+256701009090",
-        "passwordHash": "$2b$10$dRfQHy2rF2xV/Tsntjy.YOGcmlYoCHIQ/y429voT0iMLPpu30Rvvm",
+        "passwordHash": "$2b$10$SR.Us3UfhxRfF1TxmRd1Xe5MBqlFiFd0qIMzEXTfPmJK5IJ2sDFdi",
         "roleId": "role-it",
         "roleName": "IT Officer",
         "primaryBranchId": "br-nyamuyanja",
@@ -764,9 +764,9 @@
         "requiresPasswordReset": false,
         "directPermissions": [],
         "revokedPermissions": [],
-        "createdAt": "2026-10-02T09:01:48.086Z",
-        "updatedAt": "2026-10-15T07:43:08.084Z",
-        "lastLoginAt": "2026-10-15T07:43:08.084Z"
+        "createdAt": "2026-10-19T15:39:07.917Z",
+        "updatedAt": "2026-10-19T15:39:10.197Z",
+        "lastLoginAt": "2026-10-19T15:39:10.197Z"
       },
       {
         "id": "usr-it-01",
@@ -774,7 +774,7 @@
         "fullName": "Patrick Mugisha (IT Officer)",
         "email": "it.admin@nyamuyanjasacco.ug",
         "phone": "+256701234567",
-        "passwordHash": "$2b$10$wC1Z2ZgGKvF7AbCA4u521up2buvYLlMXNLF3WB1l97cXdHXXNX33e",
+        "passwordHash": "$2b$10$3KomWJal58BomPnpoNMPkefc0yRz7eRblMTjqssspW4eBh/RPwI7W",
         "roleId": "role-it",
         "roleName": "IT Officer",
         "primaryBranchId": "br-nyamuyanja",
@@ -791,9 +791,8 @@
         "requiresPasswordReset": false,
         "directPermissions": [],
         "revokedPermissions": [],
-        "createdAt": "2026-10-15T07:32:58.649Z",
-        "updatedAt": "2026-10-15T07:43:07.734Z",
-        "lastLoginAt": "2026-10-15T07:43:07.734Z"
+        "createdAt": "2026-10-19T15:39:07.917Z",
+        "updatedAt": "2026-10-19T15:39:07.917Z"
       },
       {
         "id": "usr-gm-01",
@@ -801,7 +800,7 @@
         "fullName": "Eunice Ahimbisibwe (General Manager)",
         "email": "gm@nyamuyanjasacco.ug",
         "phone": "+256702345678",
-        "passwordHash": "$2b$10$wC1Z2ZgGKvF7AbCA4u521up2buvYLlMXNLF3WB1l97cXdHXXNX33e",
+        "passwordHash": "$2b$10$3KomWJal58BomPnpoNMPkefc0yRz7eRblMTjqssspW4eBh/RPwI7W",
         "roleId": "role-gm",
         "roleName": "General Manager",
         "primaryBranchId": "br-nyamuyanja",
@@ -818,8 +817,8 @@
         "requiresPasswordReset": false,
         "directPermissions": [],
         "revokedPermissions": [],
-        "createdAt": "2026-10-15T07:32:58.649Z",
-        "updatedAt": "2026-10-15T07:32:58.649Z"
+        "createdAt": "2026-10-19T15:39:07.917Z",
+        "updatedAt": "2026-10-19T15:39:07.917Z"
       },
       {
         "id": "usr-bm-nya",
@@ -827,7 +826,7 @@
         "fullName": "Frank Twinamatsiko (Branch Manager - Nyamuyanja)",
         "email": "bm.nyamuyanja@nyamuyanjasacco.ug",
         "phone": "+256703456789",
-        "passwordHash": "$2b$10$iT8sbzo/6l4ycmUIpeVRxewtDXkAfZUb.J3o7KDmOnef4rSblWaPO",
+        "passwordHash": "$2b$10$Uj7SqV.HvmG9a32RWwq2rOjkVjdRcgHcuht3uCSTBFvT7WpT74M0.",
         "roleId": "role-bm",
         "roleName": "Branch Manager",
         "primaryBranchId": "br-nyamuyanja",
@@ -839,8 +838,8 @@
         "requiresPasswordReset": false,
         "directPermissions": [],
         "revokedPermissions": [],
-        "createdAt": "2026-10-15T07:32:58.649Z",
-        "updatedAt": "2026-10-15T07:32:58.649Z"
+        "createdAt": "2026-10-19T15:39:07.917Z",
+        "updatedAt": "2026-10-19T15:39:07.917Z"
       },
       {
         "id": "usr-csh-01",
@@ -848,7 +847,7 @@
         "fullName": "Sarah Kemigisha (Teller - Nyamuyanja)",
         "email": "teller01@nyamuyanjasacco.ug",
         "phone": "+256704567890",
-        "passwordHash": "$2b$10$iT8sbzo/6l4ycmUIpeVRxewtDXkAfZUb.J3o7KDmOnef4rSblWaPO",
+        "passwordHash": "$2b$10$Uj7SqV.HvmG9a32RWwq2rOjkVjdRcgHcuht3uCSTBFvT7WpT74M0.",
         "roleId": "role-cashier",
         "roleName": "Cashier / Teller",
         "primaryBranchId": "br-nyamuyanja",
@@ -860,8 +859,8 @@
         "requiresPasswordReset": false,
         "directPermissions": [],
         "revokedPermissions": [],
-        "createdAt": "2026-10-15T07:32:58.649Z",
-        "updatedAt": "2026-10-15T07:32:58.649Z"
+        "createdAt": "2026-10-19T15:39:07.917Z",
+        "updatedAt": "2026-10-19T15:39:07.917Z"
       },
       {
         "id": "usr-acct-01",
@@ -869,7 +868,7 @@
         "fullName": "Brian Atukwase (Accounts Assistant)",
         "email": "accounts@nyamuyanjasacco.ug",
         "phone": "+256705678901",
-        "passwordHash": "$2b$10$iT8sbzo/6l4ycmUIpeVRxewtDXkAfZUb.J3o7KDmOnef4rSblWaPO",
+        "passwordHash": "$2b$10$Uj7SqV.HvmG9a32RWwq2rOjkVjdRcgHcuht3uCSTBFvT7WpT74M0.",
         "roleId": "role-accounts",
         "roleName": "Accounts Assistant",
         "primaryBranchId": "br-nyamuyanja",
@@ -881,8 +880,8 @@
         "requiresPasswordReset": false,
         "directPermissions": [],
         "revokedPermissions": [],
-        "createdAt": "2026-10-15T07:32:58.649Z",
-        "updatedAt": "2026-10-15T07:32:58.649Z"
+        "createdAt": "2026-10-19T15:39:07.917Z",
+        "updatedAt": "2026-10-19T15:39:07.917Z"
       },
       {
         "id": "usr-aud-01",
@@ -890,7 +889,7 @@
         "fullName": "Doreen Natukunda (Internal Auditor)",
         "email": "auditor@nyamuyanjasacco.ug",
         "phone": "+256706789012",
-        "passwordHash": "$2b$10$iT8sbzo/6l4ycmUIpeVRxewtDXkAfZUb.J3o7KDmOnef4rSblWaPO",
+        "passwordHash": "$2b$10$Uj7SqV.HvmG9a32RWwq2rOjkVjdRcgHcuht3uCSTBFvT7WpT74M0.",
         "roleId": "role-auditor",
         "roleName": "Internal Auditor",
         "primaryBranchId": "br-nyamuyanja",
@@ -907,8 +906,8 @@
         "requiresPasswordReset": false,
         "directPermissions": [],
         "revokedPermissions": [],
-        "createdAt": "2026-10-15T07:32:58.649Z",
-        "updatedAt": "2026-10-15T07:32:58.649Z"
+        "createdAt": "2026-10-19T15:39:07.917Z",
+        "updatedAt": "2026-10-19T15:39:07.917Z"
       }
     ],
     "members": [],
@@ -936,8 +935,8 @@
         "isActive": true,
         "createdByUserId": "usr-it-01",
         "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-        "createdAt": "2026-10-02T07:47:53.737Z",
-        "updatedAt": "2026-10-02T07:47:53.737Z"
+        "createdAt": "2026-10-19T15:39:07.923Z",
+        "updatedAt": "2026-10-19T15:39:07.923Z"
       },
       {
         "id": "tmpl-exp-14",
@@ -954,8 +953,8 @@
         "isActive": true,
         "createdByUserId": "usr-it-01",
         "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-        "createdAt": "2026-10-02T07:47:53.737Z",
-        "updatedAt": "2026-10-02T07:47:53.737Z"
+        "createdAt": "2026-10-19T15:39:07.923Z",
+        "updatedAt": "2026-10-19T15:39:07.923Z"
       },
       {
         "id": "tmpl-exp-7",
@@ -972,8 +971,8 @@
         "isActive": true,
         "createdByUserId": "usr-it-01",
         "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-        "createdAt": "2026-10-02T07:47:53.737Z",
-        "updatedAt": "2026-10-02T07:47:53.737Z"
+        "createdAt": "2026-10-19T15:39:07.923Z",
+        "updatedAt": "2026-10-19T15:39:07.923Z"
       },
       {
         "id": "tmpl-exp-due",
@@ -989,8 +988,8 @@
         "isActive": true,
         "createdByUserId": "usr-it-01",
         "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-        "createdAt": "2026-10-02T07:47:53.737Z",
-        "updatedAt": "2026-10-02T07:47:53.737Z"
+        "createdAt": "2026-10-19T15:39:07.923Z",
+        "updatedAt": "2026-10-19T15:39:07.923Z"
       },
       {
         "id": "tmpl-clm-sub",
@@ -1006,8 +1005,8 @@
         "isActive": true,
         "createdByUserId": "usr-it-01",
         "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-        "createdAt": "2026-10-02T07:47:53.737Z",
-        "updatedAt": "2026-10-02T07:47:53.737Z"
+        "createdAt": "2026-10-19T15:39:07.923Z",
+        "updatedAt": "2026-10-19T15:39:07.923Z"
       },
       {
         "id": "tmpl-clm-docs",
@@ -1023,8 +1022,8 @@
         "isActive": true,
         "createdByUserId": "usr-it-01",
         "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-        "createdAt": "2026-10-02T07:47:53.737Z",
-        "updatedAt": "2026-10-02T07:47:53.737Z"
+        "createdAt": "2026-10-19T15:39:07.923Z",
+        "updatedAt": "2026-10-19T15:39:07.923Z"
       },
       {
         "id": "tmpl-clm-app",
@@ -1040,8 +1039,8 @@
         "isActive": true,
         "createdByUserId": "usr-it-01",
         "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-        "createdAt": "2026-10-02T07:47:53.737Z",
-        "updatedAt": "2026-10-02T07:47:53.737Z"
+        "createdAt": "2026-10-19T15:39:07.923Z",
+        "updatedAt": "2026-10-19T15:39:07.923Z"
       },
       {
         "id": "tmpl-clm-rej",
@@ -1057,8 +1056,8 @@
         "isActive": true,
         "createdByUserId": "usr-it-01",
         "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-        "createdAt": "2026-10-02T07:47:53.737Z",
-        "updatedAt": "2026-10-02T07:47:53.737Z"
+        "createdAt": "2026-10-19T15:39:07.923Z",
+        "updatedAt": "2026-10-19T15:39:07.923Z"
       },
       {
         "id": "tmpl-contrib-rec",
@@ -1076,41 +1075,18 @@
         "isActive": true,
         "createdByUserId": "usr-it-01",
         "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-        "createdAt": "2026-10-02T07:47:53.737Z",
-        "updatedAt": "2026-10-02T07:47:53.737Z"
+        "createdAt": "2026-10-19T15:39:07.923Z",
+        "updatedAt": "2026-10-19T15:39:07.923Z"
       }
     ],
-    "smsQueue": [
-      {
-        "id": "sms-1791965746286-212qj",
-        "recipientPhone": "+256754232988",
-        "recipientName": "Twiine Ivan",
-        "branchId": "br-nyamuyanja",
-        "branchName": "Nyamuyanja Branch",
-        "messageText": "Dear Twiine Ivan, claim docket [Claim Reference] has been APPROVED. Disbursement processing is underway at Nyamuyanja Branch.",
-        "status": "SENT",
-        "retryCount": 0,
-        "maxRetries": 3,
-        "provider": "AFRICAS_TALKING",
-        "queuedByUserId": "usr-1791898412830",
-        "queuedByUserFullName": "Nicholas Barugahare",
-        "createdAt": "2026-10-14T08:15:46.286Z",
-        "updatedAt": "2026-10-14T08:15:46.378Z",
-        "isSynced": true,
-        "lastAttemptAt": "2026-10-14T08:15:46.300Z",
-        "sentAt": "2026-10-14T08:15:46.378Z",
-        "providerMessageId": "ATXid_51ff85913127b2f9d8c576d2312605fb",
-        "providerCostUGX": 35,
-        "deliveryStatus": "Success"
-      }
-    ],
+    "smsQueue": [],
     "notificationEvents": [],
     "alerts": [],
     "reportHistory": [],
     "auditLogs": [
       {
-        "id": "audit-deploy-1792050188237",
-        "timestamp": "2026-10-15T07:43:08.237Z",
+        "id": "audit-deploy-1792424350360",
+        "timestamp": "2026-10-19T15:39:10.360Z",
         "userId": "usr-it-01",
         "username": "itadm",
         "userFullName": "IT Systems Officer",
@@ -1130,12 +1106,12 @@
       "system.version": "1.0.0-phase7",
       "sms.provider": "AFRICAS_TALKING",
       "sms.environment": "SANDBOX",
+      "sms.last_submission_time": "2026-10-19T15:39:10.358Z",
       "sms.last_error_sanitized": "CouldNotRoute: Telecom routing path unavailable. Eligible for retry.",
-      "sms.last_error_time": "2026-10-15T07:43:08.230Z",
-      "sms.last_submission_time": "2026-10-15T07:43:08.235Z",
-      "sms.last_success_time": "2026-10-15T07:43:08.235Z",
+      "sms.last_error_time": "2026-10-19T15:39:10.354Z",
+      "sms.last_success_time": "2026-10-19T15:39:10.358Z",
       "deployment.ready": "true",
-      "deployment.clearedAt": "2026-10-15T07:43:08.237Z",
+      "deployment.clearedAt": "2026-10-19T15:39:10.360Z",
       "deployment.status": "READY_FOR_PRODUCTION"
     },
     "businessRulesConfig": {

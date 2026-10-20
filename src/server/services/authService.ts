@@ -72,8 +72,8 @@ export class AuthService {
   }): Promise<{ success: boolean; session?: AuthSession; message?: string }> {
     const { branchId, username, password, ipAddress, userAgent } = params;
 
-    // Validate username length (4 to 6 chars)
-    if (!username || username.trim().length < 4 || username.trim().length > 6) {
+    // Validate username length (4 to 10 chars)
+    if (!username || username.trim().length < 4 || username.trim().length > 10) {
       AuditService.log({
         userId: 'system',
         username: username || 'UNKNOWN',
@@ -82,14 +82,14 @@ export class AuthService {
         branchName: 'Unknown Branch',
         action: 'LOGIN_FAILED',
         recordType: 'AUTHENTICATION',
-        reason: 'Username must be between 4 and 6 characters',
+        reason: 'Username must be between 4 and 10 characters',
         ipAddress,
         userAgent,
       });
 
       return {
         success: false,
-        message: 'Invalid credentials. Username must be between 4 and 6 characters.',
+        message: 'Invalid credentials. Username must be between 4 and 10 characters.',
       };
     }
 
@@ -377,11 +377,11 @@ export class AuthService {
   }): Promise<{ success: boolean; user?: User; message?: string }> {
     const { username, fullName, password, primaryBranchId, email, phone } = params;
 
-    // Check username rules (4 to 6 chars)
-    if (!username || username.trim().length < 4 || username.trim().length > 6) {
+    // Check username rules (4 to 10 chars)
+    if (!username || username.trim().length < 4 || username.trim().length > 10) {
       return {
         success: false,
-        message: 'Username must be between 4 and 6 characters in length.',
+        message: 'Username must be between 4 and 10 characters in length.',
       };
     }
 

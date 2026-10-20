@@ -91,9 +91,9 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onOpenSetupAdmin }) => {
     e.preventDefault();
     setErrorMessage('');
 
-    // Username validation: Min 4, max 6 characters
-    if (username.trim().length < 4 || username.trim().length > 6) {
-      setErrorMessage('Username must be between 4 and 6 characters.');
+    // Username validation: Min 4, max 10 characters
+    if (username.trim().length < 4 || username.trim().length > 10) {
+      setErrorMessage('Username must be between 4 and 10 characters.');
       return;
     }
 
@@ -220,7 +220,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onOpenSetupAdmin }) => {
               name="username"
               type="text"
               minLength={4}
-              maxLength={6}
+              maxLength={10}
               value={username}
               onChange={(e) =>
                 setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))

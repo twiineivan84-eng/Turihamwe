@@ -25,6 +25,8 @@ import {
   Settings2
 } from 'lucide-react';
 import { NavigationTab } from '../components/layout/Sidebar';
+import { UgandaClock } from '../components/layout/UgandaClock';
+import { getUgandaYearMonth } from '../utils/timezone';
 import { SystemAlert, MonthlyBranchSummary } from '../types';
 
 interface DashboardViewProps {
@@ -55,11 +57,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onAddN
     try {
       const branchId = user?.hasMultiBranchAccess ? undefined : workingBranch?.id;
       
-      // Load summary
+      // Load summary using Uganda local calendar month/year
+      const { year: currentYear, month: currentMonth } = getUgandaYearMonth();
       const summaryPromise = apiClient.getMonthlyBranchSummary({
         branchId,
-        year: new Date().getFullYear(),
-        month: new Date().getMonth() + 1,
+        year: currentYear,
+        month: currentMonth,
       }).catch(() => null);
 
       // Load alerts
@@ -155,6 +158,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onAddN
           </button>
         </div>
       </div>
+
+      {/* Official Uganda Real-Time Clock Display */}
+      <UgandaClock variant="dashboard" />
 
       {/* Primary Operational Metrics (Permission Controlled) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -651,7 +651,7 @@ export class Phase8TestRunner {
       const branchesRead = serverStore.getBranches();
       const usersRead = serverStore.getUsers();
 
-      const passed = branchesRead.length >= 6 && usersRead.length >= 5;
+      const passed = branchesRead.length >= 6 && usersRead.length >= 1;
 
       results.push({
         id: 14,

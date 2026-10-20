@@ -70,13 +70,15 @@ export class Phase9ProductionTestRunner {
 
     // STEP 1: LOGIN & AUTHENTICATION
     try {
+      const adminUsername = serverStore.getUserByUsername('ivan') ? 'ivan' : 'itadm';
+      const adminPassword = adminUsername === 'ivan' ? '9090' : 'Admin@2026!';
       const loginRes = await AuthService.login({
-        username: 'itadm',
-        password: 'Admin@2026!',
+        username: adminUsername,
+        password: adminPassword,
         branchId: hqBranch.id,
       });
 
-      const passed = loginRes.success && !!loginRes.session?.token && loginRes.session.user.username === 'itadm';
+      const passed = loginRes.success && !!loginRes.session?.token && loginRes.session.user.username === adminUsername;
       results.push({
         id: 1,
         step: 'LOGIN',

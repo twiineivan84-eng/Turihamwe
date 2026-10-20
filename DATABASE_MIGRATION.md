@@ -25,7 +25,7 @@
 | `schema_migrations` | `id` (SERIAL) | None | Migration version history & checksum validation |
 | `branches` | `id` (VARCHAR) | None | 6 Official SACCO branches (Kamubeizi, Nyamuyanja, etc.) |
 | `roles` | `id` (VARCHAR) | None | Role definitions & permission codes |
-| `users` | `id` (VARCHAR) | `role_id`, `primary_branch_id` | User accounts with 4-6 char usernames & bcrypt hashes |
+| `users` | `id` (VARCHAR) | `role_id`, `primary_branch_id` | User accounts with 4-10 char usernames & bcrypt hashes |
 | `members` | `id` (VARCHAR) | `branch_id` | Master SACCO membership ledger with unique account number |
 | `controlled_corrections` | `id` (VARCHAR) | `member_id`, `corrected_by_user_id` | Audit records for member edits after 5-day lock |
 | `turihamwe_plans` | `id` (VARCHAR) | `member_id`, `branch_id` | Enrolled welfare plans with coverage and validity |

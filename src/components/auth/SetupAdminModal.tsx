@@ -37,8 +37,8 @@ export const SetupAdminModal: React.FC<SetupAdminModalProps> = ({ isOpen, onClos
     e.preventDefault();
     setError('');
 
-    if (username.length < 4 || username.length > 6) {
-      setError('Username must strictly be between 4 and 6 characters.');
+    if (username.length < 4 || username.length > 10) {
+      setError('Username must strictly be between 4 and 10 characters.');
       return;
     }
 
@@ -119,12 +119,12 @@ export const SetupAdminModal: React.FC<SetupAdminModalProps> = ({ isOpen, onClos
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
-                Username (4–6 chars)
+                Username (4–10 chars)
               </label>
               <input
                 type="text"
                 minLength={4}
-                maxLength={6}
+                maxLength={10}
                 value={username}
                 onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
                 placeholder="e.g. itadm"

@@ -52,10 +52,10 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 );
 
 -- 5. USERS
--- Username rule: Minimum 4 characters, Maximum 6 characters
+-- Username rule: Minimum 4 characters, Maximum 10 characters
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(64) PRIMARY KEY,
-    username VARCHAR(6) NOT NULL UNIQUE CHECK (char_length(username) >= 4 AND char_length(username) <= 6),
+    username VARCHAR(10) NOT NULL UNIQUE CHECK (char_length(username) >= 4 AND char_length(username) <= 10),
     full_name VARCHAR(128) NOT NULL,
     email VARCHAR(128),
     phone VARCHAR(32),

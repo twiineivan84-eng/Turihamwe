@@ -120,7 +120,7 @@ export interface Role {
 
 export interface User {
   id: string;
-  username: string; // 4 - 6 chars as per rules
+  username: string; // 4 - 10 chars as per rules
   fullName: string;
   email?: string;
   phone?: string;

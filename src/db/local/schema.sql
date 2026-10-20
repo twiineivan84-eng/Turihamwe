@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 );
 
 -- 5. LOCAL USERS CACHE
--- Username: min 4, max 6 characters
+-- Username: min 4, max 10 characters
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,

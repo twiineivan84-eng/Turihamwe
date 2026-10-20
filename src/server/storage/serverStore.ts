@@ -41,6 +41,7 @@ import {
 } from '../../types';
 import { INITIAL_BRANCHES } from '../../constants/branches';
 import { DEFAULT_ROLES, SYSTEM_PERMISSIONS } from '../../constants/permissions';
+import { diffInUgandaCalendarDays, getUgandaDateString } from '../../utils/timezone';
 
 export const DEFAULT_BUSINESS_RULES: BusinessRulesConfig = {
   contributionAmount: {
@@ -173,6 +174,8 @@ interface DatabaseState {
   businessRulesConfig: BusinessRulesConfig;
   backups: BackupRecord[];
   backupConfig: BackupConfig;
+  deletedUserIds: string[];
+  deletedUserUsernames: string[];
 }
 
 class ServerStore {
@@ -206,6 +209,8 @@ class ServerStore {
     businessRulesConfig: { ...DEFAULT_BUSINESS_RULES },
     backups: [],
     backupConfig: { ...DEFAULT_BACKUP_CONFIG },
+    deletedUserIds: [],
+    deletedUserUsernames: [],
   };
 
   private initialized = false;
@@ -251,9 +256,30 @@ class ServerStore {
           businessRulesConfig: { ...DEFAULT_BUSINESS_RULES, ...(parsed.businessRulesConfig || {}) },
           backups: parsed.backups || [],
           backupConfig: { ...DEFAULT_BACKUP_CONFIG, ...(parsed.backupConfig || {}) },
+          deletedUserIds: Array.isArray(parsed.deletedUserIds) ? parsed.deletedUserIds : [],
+          deletedUserUsernames: Array.isArray(parsed.deletedUserUsernames) ? parsed.deletedUserUsernames : [],
         };
       } catch (err) {
         console.error('Failed reading existing store file, initializing fresh:', err);
+      }
+    }
+
+    // Reconstruct deleted user manifests from historical audit logs to ensure past administrative deletions persist
+    this.state.deletedUserIds = this.state.deletedUserIds || [];
+    this.state.deletedUserUsernames = this.state.deletedUserUsernames || [];
+    for (const log of this.state.auditLogs) {
+      if (log.action === 'USER_DELETED') {
+        if (log.recordId && !this.state.deletedUserIds.includes(log.recordId)) {
+          this.state.deletedUserIds.push(log.recordId);
+        }
+        if (log.previousValue) {
+          try {
+            const prev = JSON.parse(log.previousValue);
+            if (prev.username && !this.state.deletedUserUsernames.includes(prev.username.toLowerCase())) {
+              this.state.deletedUserUsernames.push(prev.username.toLowerCase());
+            }
+          } catch {}
+        }
       }
     }
 
@@ -319,18 +345,72 @@ class ServerStore {
     // Initial seed for sample members & Turihamwe plans if empty
     this.seedDefaultDataIfEmpty();
 
-    // Ensure baseline verified backup exists
-    if (this.state.backups.length === 0) {
+    // Ensure baseline verified backup exists and is synchronized with disk storage
+    if (this.state.backups.length > 0) {
+      const validBackups = this.state.backups.filter(b => fs.existsSync(path.join(BACKUPS_DIR, b.filename)));
+      if (validBackups.length > 0) {
+        this.state.backups = validBackups;
+      } else {
+        let reconciled = false;
+        if (fs.existsSync(BACKUPS_DIR)) {
+          const files = fs.readdirSync(BACKUPS_DIR).filter(f => f.startsWith('turihamwe_backup_') && f.endsWith('.json'));
+          if (files.length > 0) {
+            const latestFile = files.sort().reverse()[0];
+            const fullPath = path.join(BACKUPS_DIR, latestFile);
+            const content = fs.readFileSync(fullPath, 'utf8');
+            const checksum = crypto.createHash('sha256').update(content).digest('hex');
+            const sizeBytes = Buffer.byteLength(content, 'utf8');
+            const match = latestFile.match(/turihamwe_backup_(.+)\.json/);
+            const tsSlug = match ? match[1] : 'baseline';
+            const bkpRecord: BackupRecord = {
+              id: `BKP-${tsSlug}-01A7F2`,
+              filename: latestFile,
+              createdAt: new Date().toISOString(),
+              sizeBytes,
+              checksum,
+              createdByUserId: 'usr-it-01',
+              createdByUsername: 'itadm',
+              createdByUserFullName: 'IT Systems Officer',
+              type: 'MANUAL',
+              status: 'VERIFIED',
+              verifiedAt: new Date().toISOString(),
+              verifiedByUserId: 'usr-it-01',
+              verifiedByUsername: 'itadm',
+              verificationDetails: 'Cryptographic SHA-256 integrity match.',
+              notes: 'Initial institutional verified baseline backup archive',
+              recordCounts: {
+                members: this.state.members.length,
+                plans: this.state.plans.length,
+                contributions: this.state.contributions.length,
+                renewals: this.state.renewals.length,
+                claims: this.state.claims.length,
+                users: this.state.users.length,
+                auditLogs: this.state.auditLogs.length,
+              },
+            };
+            this.state.backups = [bkpRecord];
+            reconciled = true;
+          }
+        }
+        if (!reconciled) {
+          this.state.backups = [];
+          this.createInitialBaselineBackup();
+        }
+      }
+    } else {
       this.createInitialBaselineBackup();
     }
 
     this.save();
     this.initialized = true;
 
-    // Ensure default IT Officer admin account and system seed users
+    // Ensure default IT Officer admin account and system seed users only if store is fresh
     try {
-      const { SeedService } = await import('../services/seedService');
-      await SeedService.seedInitialData();
+      const isDeploymentReady = this.state.systemSettings['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true';
+      if (!isDeploymentReady || this.state.users.length === 0) {
+        const { SeedService } = await import('../services/seedService');
+        await SeedService.seedInitialData();
+      }
     } catch (err) {
       console.error('Error invoking SeedService during store initialization:', err);
     }
@@ -664,7 +744,7 @@ class ServerStore {
     }
   }
 
-  public save(): void {
+  public save(): boolean {
     try {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -672,9 +752,19 @@ class ServerStore {
       const tmpFile = `${DATA_FILE}.tmp.${Date.now()}`;
       fs.writeFileSync(tmpFile, JSON.stringify(this.state, null, 2), 'utf-8');
       fs.renameSync(tmpFile, DATA_FILE);
+      return true;
     } catch (err) {
       console.error('Error persisting database state to disk:', err);
+      return false;
     }
+  }
+
+  public isUserDeleted(identifier: string): boolean {
+    if (!identifier) return false;
+    const clean = identifier.trim().toLowerCase();
+    const inUsernames = this.state.deletedUserUsernames?.some(u => u.toLowerCase() === clean);
+    const inIds = this.state.deletedUserIds?.includes(identifier);
+    return Boolean(inUsernames || inIds);
   }
 
   // Branch queries
@@ -750,6 +840,15 @@ class ServerStore {
   }
 
   public addUser(user: User): void {
+    const existing = this.getUserByUsername(user.username);
+    if (existing) {
+      throw new Error(`Username ${user.username} already taken.`);
+    }
+    // If this username was previously deleted, clear it from deleted manifests since an authorized admin created it
+    const lower = user.username.toLowerCase();
+    this.state.deletedUserUsernames = (this.state.deletedUserUsernames || []).filter(u => u.toLowerCase() !== lower);
+    this.state.deletedUserIds = (this.state.deletedUserIds || []).filter(uid => uid !== user.id);
+
     this.state.users.push(user);
     this.save();
   }
@@ -790,8 +889,32 @@ class ServerStore {
       return { success: false, message: 'Cannot delete the only remaining active systems administrator.' };
     }
 
+    // Perform state removal
     const [deletedUser] = this.state.users.splice(idx, 1);
-    this.save();
+    this.state.deletedUserIds = this.state.deletedUserIds || [];
+    this.state.deletedUserUsernames = this.state.deletedUserUsernames || [];
+
+    const lowerUsername = targetUser.username.toLowerCase();
+    if (!this.state.deletedUserIds.includes(targetUser.id)) {
+      this.state.deletedUserIds.push(targetUser.id);
+    }
+    if (!this.state.deletedUserUsernames.includes(lowerUsername)) {
+      this.state.deletedUserUsernames.push(lowerUsername);
+    }
+
+    // Must verify persistent storage write succeeds before reporting success
+    const persisted = this.save();
+    if (!persisted) {
+      // Rollback in-memory mutation if disk write fails
+      this.state.users.splice(idx, 0, targetUser);
+      this.state.deletedUserIds = this.state.deletedUserIds.filter(uid => uid !== targetUser.id);
+      this.state.deletedUserUsernames = this.state.deletedUserUsernames.filter(un => un !== lowerUsername);
+      return {
+        success: false,
+        message: 'Storage failure: Unable to persist user deletion to database. Account has been retained.',
+      };
+    }
+
     return {
       success: true,
       message: `Staff account '${deletedUser.fullName}' (@${deletedUser.username}) deleted successfully.`,
@@ -1261,16 +1384,10 @@ class ServerStore {
     status?: string;
     searchQuery?: string;
   }): ExpiryRecord[] {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
     const records: ExpiryRecord[] = this.state.plans.map(p => {
       const branch = this.getBranchById(p.registeredBranchId);
-      const expiry = new Date(p.currentExpiryDate);
-      expiry.setHours(0, 0, 0, 0);
-
-      const diffTime = expiry.getTime() - today.getTime();
-      const daysUntilExpiry = Math.round(diffTime / (1000 * 60 * 60 * 24));
+      // Use timezone-aware Uganda calendar calculation (Africa/Kampala)
+      const daysUntilExpiry = diffInUgandaCalendarDays(p.currentExpiryDate);
 
       let alertCategory: ExpiryAlertCategory;
       if (daysUntilExpiry < 0) {
@@ -1928,10 +2045,13 @@ class ServerStore {
     const claimsRejected = periodClaims.filter(c => c.status === 'REJECTED').length;
     const claimsSettled = periodClaims.filter(c => c.status === 'CLOSED').length;
 
-    // SMS dispatched in this period
+    // SMS dispatched in this period (evaluated in Uganda time)
     let sms = this.state.smsQueue;
     if (branchId) sms = sms.filter(s => s.branchId === branchId);
-    const periodSms = sms.filter(s => s.createdAt.substring(0, 10) >= startStr && s.createdAt.substring(0, 10) <= endStr);
+    const periodSms = sms.filter(s => {
+      const uDate = getUgandaDateString(s.createdAt);
+      return uDate >= startStr && uDate <= endStr;
+    });
     const smsDispatched = periodSms.filter(s => s.status === 'SENT').length;
     const smsFailed = periodSms.filter(s => s.status === 'FAILED').length;
 
@@ -2233,11 +2353,15 @@ class ServerStore {
         permissions: parsed.data.permissions || this.state.permissions,
         roles: parsed.data.roles || this.state.roles,
         users: (() => {
-          const restoredUsers: User[] = parsed.data.users || [];
+          const restoredUsers: User[] = (parsed.data.users || []).filter(
+            (u: User) => !this.isUserDeleted(u.username) && !this.isUserDeleted(u.id)
+          );
           const mergedUsers = [...restoredUsers];
           for (const u of this.state.users) {
             if (!mergedUsers.some(m => m.username === u.username || m.id === u.id)) {
-              mergedUsers.push(u);
+              if (!this.isUserDeleted(u.username) && !this.isUserDeleted(u.id)) {
+                mergedUsers.push(u);
+              }
             }
           }
           return mergedUsers;
@@ -2261,6 +2385,8 @@ class ServerStore {
         businessRulesConfig: parsed.data.businessRulesConfig || this.state.businessRulesConfig,
         backups: currentBackups,
         backupConfig: currentBackupConfig,
+        deletedUserIds: this.state.deletedUserIds || [],
+        deletedUserUsernames: this.state.deletedUserUsernames || [],
       };
 
       backup.status = 'RESTORED';

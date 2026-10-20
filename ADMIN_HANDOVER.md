@@ -27,7 +27,7 @@ The system defines 6 core institutional roles:
 
 ### A. Managing Staff Users & Branch Rights
 1. Navigate to **Users & Rights** $\rightarrow$ **User Accounts**.
-2. **Username Rule**: Must be 4 to 6 lowercase alphanumeric characters (e.g. `itadm`, `gm001`, `bm001`).
+2. **Username Rule**: Must be 4 to 10 lowercase alphanumeric characters (e.g. `itadm`, `gm001`, `bm001`).
 3. Assign **Primary Branch**. For roving managers or auditors, enable **Multi-Branch Access** and select permitted branches.
 4. Set role and apply any specific direct permission grants or revocations.
 

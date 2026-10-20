@@ -87,7 +87,7 @@ The **Turihamwe Management System** is a dedicated welfare and bereavement manag
 
 ### 4.1 Authentication & Login Flow
 1. **Branch Selection:** Users first select or confirm their operating branch.
-2. **Username Constraint:** Strictly **4 to 6 characters** (e.g. `itadm`, `gm001`, `bmnya`, `csh01`).
+2. **Username Constraint:** Strictly **4 to 10 characters** (e.g. `itadm`, `gm001`, `bmnya`, `csh01`).
 3. **Password Security:** Salted and hashed using `bcrypt` (10 rounds). Plaintext passwords and hashes are strictly masked and never returned in API payloads or logged in audit trails.
 4. **No Auto-Lockout:** In compliance with SACCO operational directives, automatic account lockouts after failed password attempts are disabled to prevent deliberate denial-of-service against branch cashiers in rural areas.
 5. **Session Revocation:** On logout, the JWT token signature is immediately stored in a memory-backed denylist to prevent session fixation, token reuse, or replay attacks.
@@ -152,7 +152,7 @@ npm test
 ### Test Suite Summary
 - **Phase 2 (13 Tests):** Member registration, account number uniqueness, 5-day lock window, controlled corrections, branch restrictions, offline queueing.
 - **Phase 6 (10 Tests):** Multi-category reports, financial permission masking, export audit logs, Africa's Talking SMS queue, deduplication keys, 30/14/7-day expiry triggers.
-- **Phase 7 (18 Tests):** 4-6 char username rule, bcrypt hashing, single-branch isolation, session invalidation on logout, effective permissions matrix, user enable/disable, SHA-256 backup verification, controlled database restore.
+- **Phase 7 (18 Tests):** 4-10 char username rule, bcrypt hashing, single-branch isolation, session invalidation on logout, effective permissions matrix, user enable/disable, SHA-256 backup verification, controlled database restore.
 - **Phase 8 (16 Tests):** End-to-end entity lifecycle, data consistency, calendar-day 5-day rule, search boundary enforcement, claim separation of duties, document executable rejection, Africa's Talking E.164 formatting, atomic disk save, 6 branches configuration with Kamubeizi priority, business rules safety.
 
 ```bash
