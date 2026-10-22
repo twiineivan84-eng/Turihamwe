@@ -1,5 +1,6 @@
 import { serverStore } from '../storage/serverStore';
 import { AfricasTalkingAdapter } from './africasTalkingAdapter';
+import { PandoraAdapter } from './pandoraAdapter';
 import { AuditService } from './auditService';
 import { SmsWorkerStatus, SmsProviderDiagnostics } from '../../types';
 import { config } from '../config';
@@ -24,7 +25,7 @@ export class SmsQueueWorker {
   }
 
   /**
-   * Start the background queue worker.
+   * Start the background queue worker and automated plan expiry scheduler.
    */
   public start(): void {
     if (this.timer) {
@@ -32,7 +33,8 @@ export class SmsQueueWorker {
     }
 
     this.status = 'RUNNING';
-    console.log(`[SMS WORKER] Africa's Talking Queue Worker starting with ID: ${this.workerId} (interval: ${this.intervalMs / 1000}s)`);
+    const activeProvider = serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA';
+    console.log(`[SMS WORKER] Background SMS Queue Worker starting with ID: ${this.workerId} (provider: ${activeProvider}, interval: ${this.intervalMs / 1000}s)`);
 
     // Immediate first tick then periodic
     this.tick().catch(err => {
@@ -72,8 +74,9 @@ export class SmsQueueWorker {
   }
 
   /**
-   * Execute a single processing tick.
-   * Can be invoked manually from admin controls or automatically via interval.
+   * Execute a single processing tick:
+   * 1. Evaluates automated plan expiry notifications across Africa/Kampala calendar dates.
+   * 2. Claims pending messages atomically and dispatches them via active provider (Pandora or Africa's Talking).
    */
   public async tick(): Promise<{ claimed: number; sent: number; retried: number; failed: number }> {
     if (this.isProcessing) {
@@ -86,12 +89,24 @@ export class SmsQueueWorker {
     let failed = 0;
 
     try {
-      const validation = AfricasTalkingAdapter.validateConfiguration();
+      // Step 1: Automated Expiry Detection & Idempotent Scheduling (Requirement 1 & 2)
+      try {
+        const { SmsService } = await import('./smsService');
+        SmsService.evaluateExpiryNotificationEvents();
+      } catch (schedErr) {
+        console.error('[SMS WORKER] Error evaluating automated expiry notifications:', schedErr);
+      }
+
+      // Step 2: Determine Active Provider
+      const activeProvider = (serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA') as 'PANDORA' | 'AFRICAS_TALKING';
+
+      const validation = activeProvider === 'PANDORA'
+        ? PandoraAdapter.validateConfiguration()
+        : AfricasTalkingAdapter.validateConfiguration();
 
       if (!validation.canSubmit) {
         // Provider is not configured or disabled.
         // As required: queued messages stay in the queue and are never marked as sent.
-        // Record telemetry so administrators can see the exact cause.
         serverStore.recordSmsTelemetry({
           lastErrorSanitized: validation.message,
           lastErrorTime: new Date().toISOString(),
@@ -110,14 +125,22 @@ export class SmsQueueWorker {
 
       for (const msg of claimedMessages) {
         try {
-          const submission = await AfricasTalkingAdapter.submitMessage({
-            to: msg.recipientPhone,
-            messageText: msg.messageText,
-            senderId: msg.branchName.toLowerCase().includes('kamubeizi') ? undefined : config.sms.senderId,
-          });
+          msg.provider = activeProvider;
+
+          const submission = activeProvider === 'PANDORA'
+            ? await PandoraAdapter.submitMessage({
+                to: msg.recipientPhone,
+                messageText: msg.messageText,
+                senderId: config.sms.pandora.senderId,
+              })
+            : await AfricasTalkingAdapter.submitMessage({
+                to: msg.recipientPhone,
+                messageText: msg.messageText,
+                senderId: msg.branchName.toLowerCase().includes('kamubeizi') ? undefined : config.sms.senderId,
+              });
 
           if (submission.success) {
-            const isSandbox = config.sms.environment === 'SANDBOX';
+            const isSandbox = config.sms.environment === 'SANDBOX' && activeProvider === 'AFRICAS_TALKING';
             msg.status = 'SENT';
             msg.sentAt = new Date().toISOString();
             msg.providerMessageId = submission.providerMessageId;
@@ -138,8 +161,8 @@ export class SmsQueueWorker {
 
             AuditService.log({
               userId: 'system',
-              username: 'AFRICAS_TALKING_WORKER',
-              userFullName: "Africa's Talking Background Queue Worker",
+              username: activeProvider === 'PANDORA' ? 'PANDORA_WORKER' : 'AFRICAS_TALKING_WORKER',
+              userFullName: activeProvider === 'PANDORA' ? 'Pandora Background Queue Worker' : "Africa's Talking Background Queue Worker",
               branchId: msg.branchId,
               branchName: msg.branchName,
               action: 'SMS_SENT',
@@ -151,9 +174,11 @@ export class SmsQueueWorker {
                 recipientPhone: msg.recipientPhone,
                 deliveryStatus: msg.deliveryStatus,
                 deliveryConfirmed: false,
-                environment: config.sms.environment,
+                provider: activeProvider,
               }),
-              reason: isSandbox
+              reason: activeProvider === 'PANDORA'
+                ? 'Message submitted to Pandora Networks telecommunications gateway in Uganda'
+                : isSandbox
                 ? "Message submitted to Africa's Talking Sandbox; simulated in virtual dashboard (not routed to physical handset)"
                 : 'Message submitted to Africa\'s Talking telecommunications gateway',
             });
@@ -179,8 +204,8 @@ export class SmsQueueWorker {
 
               AuditService.log({
                 userId: 'system',
-                username: 'AFRICAS_TALKING_WORKER',
-                userFullName: "Africa's Talking Background Queue Worker",
+                username: activeProvider === 'PANDORA' ? 'PANDORA_WORKER' : 'AFRICAS_TALKING_WORKER',
+                userFullName: activeProvider === 'PANDORA' ? 'Pandora Background Queue Worker' : "Africa's Talking Background Queue Worker",
                 branchId: msg.branchId,
                 branchName: msg.branchName,
                 action: 'SMS_FAILED',
@@ -190,6 +215,7 @@ export class SmsQueueWorker {
                   retryCount: msg.retryCount,
                   nextRetryAt: nextRetry,
                   error: errorReason,
+                  provider: activeProvider,
                 }),
                 reason: `Temporary submission failure; scheduled for backoff retry in ${delaySeconds}s`,
               });
@@ -226,8 +252,8 @@ export class SmsQueueWorker {
 
               AuditService.log({
                 userId: 'system',
-                username: 'AFRICAS_TALKING_WORKER',
-                userFullName: "Africa's Talking Background Queue Worker",
+                username: activeProvider === 'PANDORA' ? 'PANDORA_WORKER' : 'AFRICAS_TALKING_WORKER',
+                userFullName: activeProvider === 'PANDORA' ? 'Pandora Background Queue Worker' : "Africa's Talking Background Queue Worker",
                 branchId: msg.branchId,
                 branchName: msg.branchName,
                 action: 'SMS_FAILED',
@@ -236,6 +262,7 @@ export class SmsQueueWorker {
                 newValue: JSON.stringify({
                   retryCount: msg.retryCount,
                   finalError: errorReason,
+                  provider: activeProvider,
                 }),
                 reason: 'Permanent transmission failure; staff alert created',
               });
@@ -250,7 +277,9 @@ export class SmsQueueWorker {
             });
           }
         } catch (msgErr: any) {
-          const sanitizedErr = AfricasTalkingAdapter.sanitizeError(msgErr.message);
+          const sanitizedErr = activeProvider === 'PANDORA'
+            ? PandoraAdapter.sanitizeError(msgErr.message)
+            : AfricasTalkingAdapter.sanitizeError(msgErr.message);
           msg.status = 'PENDING';
           msg.lockedAt = undefined;
           msg.lockedBy = undefined;
@@ -270,7 +299,12 @@ export class SmsQueueWorker {
    * Produce comprehensive diagnostics snapshot for administration screens.
    */
   public getDiagnostics(): SmsProviderDiagnostics {
-    const validation = AfricasTalkingAdapter.validateConfiguration();
+    const activeProvider = (serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA') as 'PANDORA' | 'AFRICAS_TALKING';
+
+    const validation = activeProvider === 'PANDORA'
+      ? PandoraAdapter.validateConfiguration()
+      : AfricasTalkingAdapter.validateConfiguration();
+
     const allMessages = serverStore.getSmsMessages();
     const telemetry = serverStore.getSmsTelemetry();
 
@@ -284,25 +318,52 @@ export class SmsQueueWorker {
       retrying: allMessages.filter(m => m.status === 'PENDING' && (m.retryCount || 0) > 0).length,
     };
 
+    if (activeProvider === 'PANDORA') {
+      const pVal = validation as import('./pandoraAdapter').PandoraValidationResult;
+      return {
+        provider: 'Pandora Networks',
+        environment: 'PRODUCTION',
+        configurationStatus: pVal.status,
+        configurationMessage: pVal.message,
+        workerStatus: this.status,
+        workerIntervalSeconds: this.getIntervalSeconds(),
+        isSubmissionEnabled: pVal.canSubmit,
+        senderId: pVal.senderId,
+        hasApiKey: pVal.hasPassword,
+        isPlaceholderKey: pVal.isPlaceholder,
+        counts,
+        lastSuccessfulSubmissionTime: telemetry.lastSuccessTime,
+        lastSubmissionAttemptTime: telemetry.lastSubmissionTime,
+        lastErrorSanitized: telemetry.lastErrorSanitized,
+        lastErrorTime: telemetry.lastErrorTime,
+        balanceEstimateUGX: telemetry.balanceEstimateUGX,
+        sandboxNotice: !pVal.canSubmit
+          ? 'Pandora SMS is the primary intended provider for Turihamwe. Outbound messages remain queued safely until authorized production credentials are configured on the backend.'
+          : undefined,
+        deliveryReceiptsSupported: false,
+      };
+    }
+
+    const atVal = validation as import('./africasTalkingAdapter').ProviderValidationResult;
     return {
       provider: "Africa's Talking",
-      environment: validation.environment,
-      configurationStatus: validation.status,
-      configurationMessage: validation.message,
+      environment: atVal.environment,
+      configurationStatus: atVal.status,
+      configurationMessage: atVal.message,
       workerStatus: this.status,
       workerIntervalSeconds: this.getIntervalSeconds(),
-      isSubmissionEnabled: validation.canSubmit,
-      senderId: validation.senderId,
-      hasApiKey: validation.hasApiKey,
-      isPlaceholderKey: validation.isPlaceholderKey,
+      isSubmissionEnabled: atVal.canSubmit,
+      senderId: atVal.senderId,
+      hasApiKey: atVal.hasApiKey,
+      isPlaceholderKey: atVal.isPlaceholderKey,
       counts,
       lastSuccessfulSubmissionTime: telemetry.lastSuccessTime,
       lastSubmissionAttemptTime: telemetry.lastSubmissionTime,
       lastErrorSanitized: telemetry.lastErrorSanitized,
       lastErrorTime: telemetry.lastErrorTime,
       balanceEstimateUGX: telemetry.balanceEstimateUGX,
-      sandboxNotice: validation.environment === 'SANDBOX'
-        ? "Africa's Talking Sandbox routes all outbound SMS messages to the Africa's Talking Web Simulator. In Sandbox mode, messages are simulated and will NEVER arrive on a physical mobile handset. To receive live SMS on physical mobile phones in Uganda, the SACCO administrator must configure production credentials."
+      sandboxNotice: atVal.environment === 'SANDBOX'
+        ? "Africa's Talking Sandbox routes all outbound SMS messages to the Africa's Talking Web Simulator. In Sandbox mode, messages are simulated and will NEVER arrive on a physical mobile handset."
         : undefined,
       deliveryReceiptsSupported: true,
     };

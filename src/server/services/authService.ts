@@ -94,6 +94,27 @@ export class AuthService {
     }
 
     const cleanUsername = username.trim().toLowerCase();
+
+    if (serverStore.isUserDeleted(cleanUsername)) {
+      AuditService.log({
+        userId: 'system',
+        username: cleanUsername,
+        userFullName: 'Deleted User',
+        branchId: branchId || 'UNKNOWN',
+        branchName: 'Unknown Branch',
+        action: 'LOGIN_FAILED',
+        recordType: 'AUTHENTICATION',
+        reason: 'User account has been deleted',
+        ipAddress,
+        userAgent,
+      });
+
+      return {
+        success: false,
+        message: 'Invalid credentials or branch selection. Please contact your IT administrator.',
+      };
+    }
+
     const user = serverStore.getUserByUsername(cleanUsername);
 
     if (!user) {
@@ -265,6 +286,10 @@ export class AuthService {
         username: string;
         workingBranchId: string;
       };
+
+      if (serverStore.isUserDeleted(decoded.sub) || serverStore.isUserDeleted(decoded.username)) {
+        return { valid: false };
+      }
 
       const user = serverStore.getUserById(decoded.sub);
       if (!user || !user.isActive) {

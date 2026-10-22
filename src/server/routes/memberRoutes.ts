@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAuth, requirePermission, AuthenticatedRequest } from '../middleware/auth';
 import { serverStore } from '../storage/serverStore';
-import { SaccoMember, ControlledCorrection } from '../../types';
+import { SaccoMember, ControlledCorrection, Beneficiary } from '../../types';
 import { AuditService } from '../services/auditService';
 import { isWithinUgandaFiveDaysWindow } from '../../utils/timezone';
 
@@ -91,13 +91,16 @@ memberRouter.get(
     const locked = !isWithinFiveDays(member.registrationDate);
     const corrections = serverStore.getCorrectionsForMember(accountNumber);
     const auditLogs = serverStore.getAuditLogs({ limit: 50 }).filter(l => l.recordId === accountNumber);
+    const beneficiaries = serverStore.getBeneficiaries(undefined, accountNumber).filter(b => b.isActive !== false);
 
     res.json({
       success: true,
       data: {
         ...member,
+        clientStatus: member.clientStatus || 'ALIVE',
         branchName: branch ? branch.name : member.branchName,
         isLockedFromNormalEdit: locked,
+        beneficiaries,
         corrections,
         auditLogs,
       },
@@ -223,6 +226,55 @@ memberRouter.post(
 
     const nowIso = new Date().toISOString();
     const registrationDate = body.registrationDate || nowIso.split('T')[0];
+    const clientStatus = body.clientStatus === 'DECEASED' ? 'DECEASED' : 'ALIVE';
+
+    // Requirement 3: Validate beneficiaries submitted in the registration workflow
+    const beneficiariesToCreate: Beneficiary[] = [];
+    if (Array.isArray(body.beneficiaries) && body.beneficiaries.length > 0) {
+      for (let i = 0; i < body.beneficiaries.length; i++) {
+        const b = body.beneficiaries[i];
+        const bName = (b.fullName || '').trim();
+        const bDob = (b.dateOfBirth || '').trim();
+        const bRel = (b.relationship || '').trim();
+
+        if (!bName) {
+          res.status(400).json({ error: `Beneficiary #${i + 1}: Full legal name is required.` });
+          return;
+        }
+        if (!bDob) {
+          res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): Date of birth is required.` });
+          return;
+        }
+        const bDobTime = new Date(bDob).getTime();
+        if (isNaN(bDobTime)) {
+          res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): Date of birth is invalid.` });
+          return;
+        }
+        if (bDobTime > Date.now()) {
+          res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): Date of birth cannot be in the future.` });
+          return;
+        }
+        if (!bRel) {
+          res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): Relationship to member is required.` });
+          return;
+        }
+
+        beneficiariesToCreate.push({
+          id: `ben-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${i}`,
+          saccoAccountNumber,
+          planId: '',
+          fullName: bName,
+          relationship: bRel,
+          dateOfBirth: bDob,
+          nationalIdNumber: (b.nationalIdNumber || '').trim().toUpperCase() || undefined,
+          contactPhone: (b.contactPhone || '').trim() || undefined,
+          percentageAllocation: Number(b.percentageAllocation) || Math.floor(100 / body.beneficiaries.length),
+          isActive: true,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+      }
+    }
 
     const newMember: SaccoMember = {
       saccoAccountNumber,
@@ -240,6 +292,10 @@ memberRouter.post(
       registrationDate,
       branchId: targetBranch.id,
       branchName: targetBranch.name,
+      clientStatus,
+      clientStatusUpdatedAt: nowIso,
+      clientStatusUpdatedByUserId: user.id,
+      clientStatusUpdatedByUsername: user.username,
       createdById: user.id,
       createdByUsername: user.username,
       createdAt: nowIso,
@@ -248,9 +304,13 @@ memberRouter.post(
       turihamweStatus: 'UNREGISTERED',
     };
 
+    // Atomic persistence of member and linked beneficiaries
     serverStore.addMember(newMember);
+    if (beneficiariesToCreate.length > 0) {
+      serverStore.addBeneficiaries(beneficiariesToCreate);
+    }
 
-    // Audit log
+    // Audit logs
     AuditService.log({
       userId: user.id,
       username: user.username,
@@ -260,10 +320,31 @@ memberRouter.post(
       action: 'MEMBER_CREATED',
       recordType: 'MEMBERS',
       recordId: saccoAccountNumber,
-      newValue: `Registered member ${fullName} (A/C: ${saccoAccountNumber}) at ${targetBranch.name}`,
+      newValue: `Registered member ${fullName} (A/C: ${saccoAccountNumber}, Status: ${clientStatus}) with ${beneficiariesToCreate.length} beneficiaries at ${targetBranch.name}`,
     });
 
-    res.status(201).json({ success: true, data: newMember });
+    for (const ben of beneficiariesToCreate) {
+      AuditService.log({
+        userId: user.id,
+        username: user.username,
+        userFullName: user.fullName,
+        branchId: targetBranch.id,
+        branchName: targetBranch.name,
+        action: 'BENEFICIARY_ADDED',
+        recordType: 'BENEFICIARY',
+        recordId: ben.id,
+        newValue: JSON.stringify(ben),
+        reason: `Enrolled beneficiary ${ben.fullName} (${ben.relationship}) during registration of member ${saccoAccountNumber}`,
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      data: {
+        ...newMember,
+        beneficiaries: beneficiariesToCreate,
+      },
+    });
   }
 );
 
@@ -555,6 +636,288 @@ memberRouter.delete(
       data: result.member,
       dependencies: result.dependencies,
     });
+  }
+);
+
+/**
+ * PATCH /api/members/:accountNumber/status
+ * Update member vitality status: 'ALIVE' or 'DECEASED'
+ * Requirement 4: Explicit status, immediate persistence, audit trail with previous and new status.
+ * Marking DECEASED does NOT delete member or linked beneficiaries, claims, or financials.
+ */
+memberRouter.patch(
+  '/:accountNumber/status',
+  requireAuth,
+  requirePermission('members.edit'),
+  (req: AuthenticatedRequest, res: Response): void => {
+    const user = req.user!;
+    const workingBranch = req.workingBranch!;
+    const accountNumber = req.params.accountNumber.trim().toUpperCase();
+    const { status, reason } = req.body;
+
+    if (!status || !['ALIVE', 'DECEASED'].includes(status)) {
+      res.status(400).json({ error: "Invalid status: Must explicitly be 'ALIVE' or 'DECEASED'." });
+      return;
+    }
+
+    const member = serverStore.getMemberByAccountNumber(accountNumber);
+    if (!member) {
+      res.status(404).json({ error: `Member with SACCO account number '${accountNumber}' not found.` });
+      return;
+    }
+
+    // Branch Authorization check
+    if (!user.hasMultiBranchAccess) {
+      const userBranchId = workingBranch?.id || user.primaryBranchId;
+      if (member.branchId !== userBranchId) {
+        res.status(403).json({ error: 'Forbidden: You are not authorized to modify member status in another branch.' });
+        return;
+      }
+    } else {
+      const allowed = new Set([user.primaryBranchId, ...(user.allowedBranchIds || [])]);
+      if (!allowed.has(member.branchId)) {
+        res.status(403).json({ error: "Forbidden: You do not have multi-branch access to this member's branch." });
+        return;
+      }
+    }
+
+    const previousStatus = member.clientStatus || 'ALIVE';
+    const nowIso = new Date().toISOString();
+
+    const updated = serverStore.updateMember(accountNumber, {
+      clientStatus: status as 'ALIVE' | 'DECEASED',
+      clientStatusUpdatedAt: nowIso,
+      clientStatusUpdatedByUserId: user.id,
+      clientStatusUpdatedByUsername: user.username,
+      clientStatusReason: reason?.trim() || undefined,
+    });
+
+    AuditService.log({
+      userId: user.id,
+      username: user.username,
+      userFullName: user.fullName,
+      branchId: member.branchId,
+      branchName: member.branchName || workingBranch.name,
+      action: 'MEMBER_STATUS_CHANGED',
+      recordType: 'MEMBERS',
+      recordId: accountNumber,
+      previousValue: previousStatus,
+      newValue: status,
+      reason: reason?.trim() || `Client status updated from ${previousStatus} to ${status}`,
+    });
+
+    res.json({
+      success: true,
+      data: updated,
+      message: `Member vitality status updated to ${status}.`,
+    });
+  }
+);
+
+/**
+ * GET /api/members/:accountNumber/beneficiaries
+ * Retrieve registered beneficiaries for a SACCO member.
+ */
+memberRouter.get(
+  '/:accountNumber/beneficiaries',
+  requireAuth,
+  requirePermission('members.view'),
+  (req: AuthenticatedRequest, res: Response): void => {
+    const accountNumber = req.params.accountNumber.trim().toUpperCase();
+    const member = serverStore.getMemberByAccountNumber(accountNumber);
+    if (!member) {
+      res.status(404).json({ error: `Member with SACCO account number '${accountNumber}' not found.` });
+      return;
+    }
+    const beneficiaries = serverStore.getBeneficiaries(undefined, accountNumber).filter(b => b.isActive !== false);
+    res.json({ success: true, data: beneficiaries });
+  }
+);
+
+/**
+ * POST /api/members/:accountNumber/beneficiaries
+ * Add a beneficiary for an existing member.
+ */
+memberRouter.post(
+  '/:accountNumber/beneficiaries',
+  requireAuth,
+  requirePermission('members.edit'),
+  (req: AuthenticatedRequest, res: Response): void => {
+    const user = req.user!;
+    const workingBranch = req.workingBranch!;
+    const accountNumber = req.params.accountNumber.trim().toUpperCase();
+    const member = serverStore.getMemberByAccountNumber(accountNumber);
+    if (!member) {
+      res.status(404).json({ error: `Member with SACCO account number '${accountNumber}' not found.` });
+      return;
+    }
+
+    const { fullName, dateOfBirth, relationship, nationalIdNumber, contactPhone, percentageAllocation } = req.body;
+
+    if (!fullName || !fullName.trim()) {
+      res.status(400).json({ error: 'Beneficiary full name is required.' });
+      return;
+    }
+    if (!dateOfBirth) {
+      res.status(400).json({ error: 'Beneficiary date of birth is required.' });
+      return;
+    }
+    const dobTime = new Date(dateOfBirth).getTime();
+    if (isNaN(dobTime)) {
+      res.status(400).json({ error: 'Beneficiary date of birth is invalid.' });
+      return;
+    }
+    if (dobTime > Date.now()) {
+      res.status(400).json({ error: 'Beneficiary date of birth cannot be in the future.' });
+      return;
+    }
+    if (!relationship || !relationship.trim()) {
+      res.status(400).json({ error: 'Beneficiary relationship is required.' });
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const newBeneficiary: Beneficiary = {
+      id: `ben-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      saccoAccountNumber: member.saccoAccountNumber,
+      planId: '',
+      fullName: fullName.trim(),
+      relationship: relationship.trim(),
+      dateOfBirth: dateOfBirth.trim(),
+      nationalIdNumber: (nationalIdNumber || '').trim().toUpperCase() || undefined,
+      contactPhone: (contactPhone || '').trim() || undefined,
+      percentageAllocation: Number(percentageAllocation) || 0,
+      isActive: true,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    serverStore.addBeneficiary(newBeneficiary);
+
+    AuditService.log({
+      userId: user.id,
+      username: user.username,
+      userFullName: user.fullName,
+      branchId: member.branchId,
+      branchName: member.branchName || workingBranch.name,
+      action: 'BENEFICIARY_ADDED',
+      recordType: 'BENEFICIARY',
+      recordId: newBeneficiary.id,
+      newValue: JSON.stringify(newBeneficiary),
+      reason: `Added beneficiary ${newBeneficiary.fullName} (${newBeneficiary.relationship}) for member ${accountNumber}`,
+    });
+
+    res.status(201).json({ success: true, data: newBeneficiary });
+  }
+);
+
+/**
+ * PUT /api/members/:accountNumber/beneficiaries/:beneficiaryId
+ * Update beneficiary details.
+ */
+memberRouter.put(
+  '/:accountNumber/beneficiaries/:beneficiaryId',
+  requireAuth,
+  requirePermission('members.edit'),
+  (req: AuthenticatedRequest, res: Response): void => {
+    const user = req.user!;
+    const workingBranch = req.workingBranch!;
+    const { accountNumber, beneficiaryId } = req.params;
+    const member = serverStore.getMemberByAccountNumber(accountNumber.trim().toUpperCase());
+    if (!member) {
+      res.status(404).json({ error: `Member with SACCO account number '${accountNumber}' not found.` });
+      return;
+    }
+
+    const b = serverStore.getBeneficiaries().find(x => x.id === beneficiaryId);
+    if (!b || b.saccoAccountNumber.toUpperCase() !== accountNumber.trim().toUpperCase()) {
+      res.status(404).json({ error: 'Beneficiary record not found for this member.' });
+      return;
+    }
+
+    const { fullName, dateOfBirth, relationship, nationalIdNumber, contactPhone, percentageAllocation } = req.body;
+    const updates: Partial<Beneficiary> = {};
+
+    if (fullName !== undefined) updates.fullName = fullName.trim();
+    if (relationship !== undefined) updates.relationship = relationship.trim();
+    if (dateOfBirth !== undefined) {
+      const dobTime = new Date(dateOfBirth).getTime();
+      if (isNaN(dobTime)) {
+        res.status(400).json({ error: 'Beneficiary date of birth is invalid.' });
+        return;
+      }
+      if (dobTime > Date.now()) {
+        res.status(400).json({ error: 'Beneficiary date of birth cannot be in the future.' });
+        return;
+      }
+      updates.dateOfBirth = dateOfBirth.trim();
+    }
+    if (nationalIdNumber !== undefined) updates.nationalIdNumber = nationalIdNumber.trim().toUpperCase();
+    if (contactPhone !== undefined) updates.contactPhone = contactPhone.trim();
+    if (percentageAllocation !== undefined) updates.percentageAllocation = Number(percentageAllocation);
+
+    const prev = JSON.stringify(b);
+    const updated = serverStore.updateBeneficiary(beneficiaryId, updates);
+
+    AuditService.log({
+      userId: user.id,
+      username: user.username,
+      userFullName: user.fullName,
+      branchId: member.branchId,
+      branchName: member.branchName || workingBranch.name,
+      action: 'BENEFICIARY_UPDATED',
+      recordType: 'BENEFICIARY',
+      recordId: beneficiaryId,
+      previousValue: prev,
+      newValue: JSON.stringify(updated),
+      reason: `Updated beneficiary details for member ${accountNumber}`,
+    });
+
+    res.json({ success: true, data: updated });
+  }
+);
+
+/**
+ * DELETE /api/members/:accountNumber/beneficiaries/:beneficiaryId
+ * Deactivate beneficiary record.
+ */
+memberRouter.delete(
+  '/:accountNumber/beneficiaries/:beneficiaryId',
+  requireAuth,
+  requirePermission('members.edit'),
+  (req: AuthenticatedRequest, res: Response): void => {
+    const user = req.user!;
+    const workingBranch = req.workingBranch!;
+    const { accountNumber, beneficiaryId } = req.params;
+    const member = serverStore.getMemberByAccountNumber(accountNumber.trim().toUpperCase());
+    if (!member) {
+      res.status(404).json({ error: `Member with SACCO account number '${accountNumber}' not found.` });
+      return;
+    }
+
+    const b = serverStore.getBeneficiaries().find(x => x.id === beneficiaryId);
+    if (!b || b.saccoAccountNumber.toUpperCase() !== accountNumber.trim().toUpperCase()) {
+      res.status(404).json({ error: 'Beneficiary record not found for this member.' });
+      return;
+    }
+
+    serverStore.deleteBeneficiary(beneficiaryId);
+
+    AuditService.log({
+      userId: user.id,
+      username: user.username,
+      userFullName: user.fullName,
+      branchId: member.branchId,
+      branchName: member.branchName || workingBranch.name,
+      action: 'BENEFICIARY_REMOVED',
+      recordType: 'BENEFICIARY',
+      recordId: beneficiaryId,
+      previousValue: JSON.stringify(b),
+      newValue: JSON.stringify({ isActive: false }),
+      reason: `Removed/deactivated beneficiary ${b.fullName} (${b.relationship}) from member ${accountNumber}`,
+    });
+
+    res.json({ success: true, message: 'Beneficiary removed successfully.' });
   }
 );
 

@@ -95,6 +95,10 @@ export const SmsNotificationsView: React.FC = () => {
   const [testSendPhone, setTestSendPhone] = useState<string>('+256701234567');
   const [isTestSending, setIsTestSending] = useState<boolean>(false);
 
+  // Active Provider State
+  const [activeProvider, setActiveProvider] = useState<'PANDORA' | 'AFRICAS_TALKING'>('PANDORA');
+  const [isSwitchingProvider, setIsSwitchingProvider] = useState<boolean>(false);
+
   // Manual Compose State
   const [membersList, setMembersList] = useState<SaccoMember[]>([]);
   const [composeMemberAccount, setComposeMemberAccount] = useState<string>('');
@@ -104,6 +108,35 @@ export const SmsNotificationsView: React.FC = () => {
   const [composeMessageText, setComposeMessageText] = useState<string>('');
   const [composeDispatchImmediately, setComposeDispatchImmediately] = useState<boolean>(true);
   const [isSubmittingSms, setIsSubmittingSms] = useState<boolean>(false);
+
+  const fetchActiveProvider = async () => {
+    try {
+      const res = await apiClient.getSmsProvider();
+      if (res.success && res.provider) {
+        setActiveProvider(res.provider);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSwitchProvider = async (targetProvider: 'PANDORA' | 'AFRICAS_TALKING') => {
+    setIsSwitchingProvider(true);
+    setStatusFeedback(null);
+    try {
+      const res = await apiClient.setSmsProvider(targetProvider);
+      if (res.success) {
+        setActiveProvider(targetProvider);
+        setStatusFeedback({ type: 'success', message: res.message });
+        fetchDiagnostics();
+        fetchQueue();
+      }
+    } catch (err: any) {
+      setStatusFeedback({ type: 'error', message: err.message || 'Failed to switch SMS provider.' });
+    } finally {
+      setIsSwitchingProvider(false);
+    }
+  };
 
   // Initial load
   useEffect(() => {
@@ -115,6 +148,7 @@ export const SmsNotificationsView: React.FC = () => {
     } else if (workingBranch) {
       setBranchFilter(workingBranch.id);
     }
+    fetchActiveProvider();
     fetchDiagnostics();
   }, [user, workingBranch]);
 
@@ -575,7 +609,7 @@ export const SmsNotificationsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Africa's Talking Provider Status & Diagnostics Panel */}
+      {/* SMS Gateway Provider Status & Diagnostics Panel */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
         {/* Main Provider Header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
@@ -589,7 +623,9 @@ export const SmsNotificationsView: React.FC = () => {
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-bold text-slate-900 text-sm">Provider: Africa&apos;s Talking (Uganda SMS Gateway)</span>
+                <span className="font-bold text-slate-900 text-sm">
+                  Gateway: {diagnostics?.provider || (activeProvider === 'PANDORA' ? 'Pandora Networks' : "Africa's Talking")}
+                </span>
                 
                 {/* Configuration Status Badge */}
                 {diagnostics?.configurationStatus === 'CONFIGURED' ? (
@@ -604,9 +640,14 @@ export const SmsNotificationsView: React.FC = () => {
                 ) : (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 text-amber-600" />
-                    NOT CONFIGURED
+                    PENDING BACKEND CONFIG
                   </span>
                 )}
+
+                {/* Sender ID Badge */}
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200 font-mono">
+                  Sender: {diagnostics?.senderId || (activeProvider === 'PANDORA' ? 'NYAMUYANJA' : 'TURIHAMWE')}
+                </span>
 
                 {/* Environment Badge */}
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
@@ -629,9 +670,38 @@ export const SmsNotificationsView: React.FC = () => {
                   Worker: {diagnostics?.workerStatus || 'STOPPED'}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Direct telecommunications dispatch via official Africa&apos;s Talking REST API • Uganda E.164 (+256) formatting
-              </p>
+              <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-500">
+                <span>Dual-Provider Architecture • Durable Deduplication • Africa/Kampala UTC+3</span>
+                {hasPermission('admin.system_settings') && (
+                  <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                    <span className="text-[10px] font-semibold text-slate-600">Active Provider:</span>
+                    <button
+                      type="button"
+                      disabled={isSwitchingProvider}
+                      onClick={() => handleSwitchProvider('PANDORA')}
+                      className={`text-[10px] px-2 py-0.5 rounded font-bold transition ${
+                        activeProvider === 'PANDORA'
+                          ? 'bg-blue-700 text-white shadow-xs'
+                          : 'bg-white text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      Pandora (Primary)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSwitchingProvider}
+                      onClick={() => handleSwitchProvider('AFRICAS_TALKING')}
+                      className={`text-[10px] px-2 py-0.5 rounded font-bold transition ${
+                        activeProvider === 'AFRICAS_TALKING'
+                          ? 'bg-blue-700 text-white shadow-xs'
+                          : 'bg-white text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      Africa&apos;s Talking
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1097,6 +1167,24 @@ export const SmsNotificationsView: React.FC = () => {
       {/* TAB 2: SMS TEMPLATES */}
       {activeTab === 'templates' && (
         <div className="space-y-4">
+          {/* Approved Runyankore Expiry Template Highlight */}
+          <div className="bg-amber-50/70 border border-amber-200 p-4 rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-900 bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
+                Official Approved Expiry Template (Requirement 2)
+              </span>
+              <span className="text-[10px] font-mono text-amber-800 bg-white px-2 py-0.5 rounded border border-amber-200">
+                133 GSM-7 Chars • 1 Segment (&le;160 Chars)
+              </span>
+            </div>
+            <p className="font-mono text-xs text-amber-950 bg-white p-3 rounded-lg border border-amber-200 leading-relaxed font-semibold">
+              &quot;NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba&quot;
+            </p>
+            <p className="text-[11px] text-amber-800">
+              Preserved exact institutional wording approved by SACCO leadership. Automatically dispatched on policy expiry date in Africa/Kampala timezone.
+            </p>
+          </div>
+
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-500">
               Approved SACCO SMS Templates • Standardized message structures and automated policy triggers

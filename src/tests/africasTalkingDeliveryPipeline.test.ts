@@ -47,6 +47,12 @@ export async function runAfricasTalkingSuite(): Promise<{
   const originalSenderId = config.sms.senderId;
   const originalEnv = config.sms.environment;
   const originalEnabled = config.sms.enabled;
+  const originalProvider = config.sms.provider;
+  const originalStoreSetting = serverStore.getSystemSetting('sms.provider');
+
+  // Explicitly activate Africa's Talking for this dedicated delivery pipeline test suite
+  config.sms.provider = 'AFRICAS_TALKING';
+  serverStore.setSystemSetting('sms.provider', 'AFRICAS_TALKING');
 
   function restoreConfig() {
     config.sms.apiKey = originalApiKey;
@@ -54,6 +60,8 @@ export async function runAfricasTalkingSuite(): Promise<{
     config.sms.senderId = originalSenderId;
     config.sms.environment = originalEnv;
     config.sms.enabled = originalEnabled;
+    config.sms.provider = 'AFRICAS_TALKING';
+    serverStore.setSystemSetting('sms.provider', 'AFRICAS_TALKING');
     globalThis.fetch = originalFetch;
   }
 
@@ -636,7 +644,7 @@ export async function runAfricasTalkingSuite(): Promise<{
       passed,
       message: passed
         ? 'Connection test verified credentials via User balance endpoint without dispatching any SMS'
-        : 'Safe connection test failed or attempted messaging endpoint',
+        : `Safe connection test failed: connected=${connTest.connected}, balance=${connTest.balanceUGX}, error=${connTest.error}, reachedMsg=${reachedMessagingEndpoint}`,
     });
   } catch (err: any) {
     results.push({ id: 15, name: 'Safe Connection Test (Zero SMS Sent)', passed: false, message: err.message });
@@ -646,7 +654,15 @@ export async function runAfricasTalkingSuite(): Promise<{
 
   // Print results
   for (const r of results) {
-    console.log(`  ${r.passed ? '✓' : '✗'} Test ${String(r.id).padStart(2, '0')}: ${r.name}`);
+    console.log(`  ${r.passed ? '✓' : '✗'} Test ${String(r.id).padStart(2, '0')}: ${r.name}${r.passed ? '' : ' — ' + r.message}`);
+  }
+
+  // Restore original system SMS provider settings
+  config.sms.provider = originalProvider;
+  if (originalStoreSetting) {
+    serverStore.setSystemSetting('sms.provider', originalStoreSetting);
+  } else {
+    serverStore.setSystemSetting('sms.provider', 'PANDORA');
   }
 
   const allPassed = results.every(r => r.passed);

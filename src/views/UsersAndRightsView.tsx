@@ -348,6 +348,7 @@ export const UsersAndRightsView: React.FC = () => {
         });
         setDeletingUser(null);
         setDeleteReason('');
+        await loadData();
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to delete staff account';

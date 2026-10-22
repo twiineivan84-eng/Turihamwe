@@ -739,7 +739,7 @@
       "fullName": "Ivan (IT Officer)",
       "email": "ivan.it@nyamuyanjasacco.ug",
       "phone": "+256701009090",
-      "passwordHash": "$2b$10$SR.Us3UfhxRfF1TxmRd1Xe5MBqlFiFd0qIMzEXTfPmJK5IJ2sDFdi",
+      "passwordHash": "$2b$10$AKRWzOAl8V8xJzvdn2E/3e1gkbAD8xpN.E8StK9Dp8Q1zF9NlIKjO",
       "roleId": "role-it",
       "roleName": "IT Officer",
       "primaryBranchId": "br-nyamuyanja",
@@ -756,9 +756,9 @@
       "requiresPasswordReset": false,
       "directPermissions": [],
       "revokedPermissions": [],
-      "createdAt": "2026-10-19T15:39:07.917Z",
-      "updatedAt": "2026-10-19T15:39:10.197Z",
-      "lastLoginAt": "2026-10-19T15:39:10.197Z"
+      "createdAt": "2026-10-21T14:48:53.116Z",
+      "updatedAt": "2026-10-21T14:48:56.073Z",
+      "lastLoginAt": "2026-10-21T14:48:56.073Z"
     },
     {
       "id": "usr-it-01",
@@ -766,7 +766,7 @@
       "fullName": "Patrick Mugisha (IT Officer)",
       "email": "it.admin@nyamuyanjasacco.ug",
       "phone": "+256701234567",
-      "passwordHash": "$2b$10$3KomWJal58BomPnpoNMPkefc0yRz7eRblMTjqssspW4eBh/RPwI7W",
+      "passwordHash": "$2b$10$NUToOuelRee7TE67NT5TwujakF23gw57JBDGobOTHsmdIKt4z1A5i",
       "roleId": "role-it",
       "roleName": "IT Officer",
       "primaryBranchId": "br-nyamuyanja",
@@ -783,8 +783,8 @@
       "requiresPasswordReset": false,
       "directPermissions": [],
       "revokedPermissions": [],
-      "createdAt": "2026-10-19T15:39:07.917Z",
-      "updatedAt": "2026-10-19T15:39:07.917Z"
+      "createdAt": "2026-10-21T14:48:53.116Z",
+      "updatedAt": "2026-10-21T14:48:53.116Z"
     },
     {
       "id": "usr-gm-01",
@@ -792,7 +792,7 @@
       "fullName": "Eunice Ahimbisibwe (General Manager)",
       "email": "gm@nyamuyanjasacco.ug",
       "phone": "+256702345678",
-      "passwordHash": "$2b$10$3KomWJal58BomPnpoNMPkefc0yRz7eRblMTjqssspW4eBh/RPwI7W",
+      "passwordHash": "$2b$10$NUToOuelRee7TE67NT5TwujakF23gw57JBDGobOTHsmdIKt4z1A5i",
       "roleId": "role-gm",
       "roleName": "General Manager",
       "primaryBranchId": "br-nyamuyanja",
@@ -809,8 +809,8 @@
       "requiresPasswordReset": false,
       "directPermissions": [],
       "revokedPermissions": [],
-      "createdAt": "2026-10-19T15:39:07.917Z",
-      "updatedAt": "2026-10-19T15:39:07.917Z"
+      "createdAt": "2026-10-21T14:48:53.116Z",
+      "updatedAt": "2026-10-21T14:48:53.116Z"
     },
     {
       "id": "usr-bm-nya",
@@ -818,7 +818,7 @@
       "fullName": "Frank Twinamatsiko (Branch Manager - Nyamuyanja)",
       "email": "bm.nyamuyanja@nyamuyanjasacco.ug",
       "phone": "+256703456789",
-      "passwordHash": "$2b$10$Uj7SqV.HvmG9a32RWwq2rOjkVjdRcgHcuht3uCSTBFvT7WpT74M0.",
+      "passwordHash": "$2b$10$7CqBM7KrHFs/sqg/Hy9isecRjUCmpQCSk7tYmYbUgPv5oTyHXSQoW",
       "roleId": "role-bm",
       "roleName": "Branch Manager",
       "primaryBranchId": "br-nyamuyanja",
@@ -830,8 +830,8 @@
       "requiresPasswordReset": false,
       "directPermissions": [],
       "revokedPermissions": [],
-      "createdAt": "2026-10-19T15:39:07.917Z",
-      "updatedAt": "2026-10-19T15:39:07.917Z"
+      "createdAt": "2026-10-21T14:48:53.116Z",
+      "updatedAt": "2026-10-21T14:48:53.116Z"
     },
     {
       "id": "usr-csh-01",
@@ -839,7 +839,7 @@
       "fullName": "Sarah Kemigisha (Teller - Nyamuyanja)",
       "email": "teller01@nyamuyanjasacco.ug",
       "phone": "+256704567890",
-      "passwordHash": "$2b$10$Uj7SqV.HvmG9a32RWwq2rOjkVjdRcgHcuht3uCSTBFvT7WpT74M0.",
+      "passwordHash": "$2b$10$7CqBM7KrHFs/sqg/Hy9isecRjUCmpQCSk7tYmYbUgPv5oTyHXSQoW",
       "roleId": "role-cashier",
       "roleName": "Cashier / Teller",
       "primaryBranchId": "br-nyamuyanja",
@@ -851,8 +851,8 @@
       "requiresPasswordReset": false,
       "directPermissions": [],
       "revokedPermissions": [],
-      "createdAt": "2026-10-19T15:39:07.917Z",
-      "updatedAt": "2026-10-19T15:39:07.917Z"
+      "createdAt": "2026-10-21T14:48:53.116Z",
+      "updatedAt": "2026-10-21T14:48:53.116Z"
     },
     {
       "id": "usr-acct-01",
@@ -860,7 +860,7 @@
       "fullName": "Brian Atukwase (Accounts Assistant)",
       "email": "accounts@nyamuyanjasacco.ug",
       "phone": "+256705678901",
-      "passwordHash": "$2b$10$Uj7SqV.HvmG9a32RWwq2rOjkVjdRcgHcuht3uCSTBFvT7WpT74M0.",
+      "passwordHash": "$2b$10$7CqBM7KrHFs/sqg/Hy9isecRjUCmpQCSk7tYmYbUgPv5oTyHXSQoW",
       "roleId": "role-accounts",
       "roleName": "Accounts Assistant",
       "primaryBranchId": "br-nyamuyanja",
@@ -872,8 +872,8 @@
       "requiresPasswordReset": false,
       "directPermissions": [],
       "revokedPermissions": [],
-      "createdAt": "2026-10-19T15:39:07.917Z",
-      "updatedAt": "2026-10-19T15:39:07.917Z"
+      "createdAt": "2026-10-21T14:48:53.116Z",
+      "updatedAt": "2026-10-21T14:48:53.116Z"
     },
     {
       "id": "usr-aud-01",
@@ -881,7 +881,7 @@
       "fullName": "Doreen Natukunda (Internal Auditor)",
       "email": "auditor@nyamuyanjasacco.ug",
       "phone": "+256706789012",
-      "passwordHash": "$2b$10$Uj7SqV.HvmG9a32RWwq2rOjkVjdRcgHcuht3uCSTBFvT7WpT74M0.",
+      "passwordHash": "$2b$10$7CqBM7KrHFs/sqg/Hy9isecRjUCmpQCSk7tYmYbUgPv5oTyHXSQoW",
       "roleId": "role-auditor",
       "roleName": "Internal Auditor",
       "primaryBranchId": "br-nyamuyanja",
@@ -898,8 +898,8 @@
       "requiresPasswordReset": false,
       "directPermissions": [],
       "revokedPermissions": [],
-      "createdAt": "2026-10-19T15:39:07.917Z",
-      "updatedAt": "2026-10-19T15:39:07.917Z"
+      "createdAt": "2026-10-21T14:48:53.116Z",
+      "updatedAt": "2026-10-21T14:48:53.116Z"
     }
   ],
   "members": [],
@@ -927,8 +927,8 @@
       "isActive": true,
       "createdByUserId": "usr-it-01",
       "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-      "createdAt": "2026-10-19T15:39:07.923Z",
-      "updatedAt": "2026-10-19T15:39:07.923Z"
+      "createdAt": "2026-10-21T14:48:53.123Z",
+      "updatedAt": "2026-10-21T14:48:53.123Z"
     },
     {
       "id": "tmpl-exp-14",
@@ -945,8 +945,8 @@
       "isActive": true,
       "createdByUserId": "usr-it-01",
       "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-      "createdAt": "2026-10-19T15:39:07.923Z",
-      "updatedAt": "2026-10-19T15:39:07.923Z"
+      "createdAt": "2026-10-21T14:48:53.123Z",
+      "updatedAt": "2026-10-21T14:48:53.123Z"
     },
     {
       "id": "tmpl-exp-7",
@@ -963,25 +963,21 @@
       "isActive": true,
       "createdByUserId": "usr-it-01",
       "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-      "createdAt": "2026-10-19T15:39:07.923Z",
-      "updatedAt": "2026-10-19T15:39:07.923Z"
+      "createdAt": "2026-10-21T14:48:53.123Z",
+      "updatedAt": "2026-10-21T14:48:53.123Z"
     },
     {
       "id": "tmpl-exp-due",
       "code": "EXPIRY_DATE_NOTICE",
       "category": "EXPIRY_DATE_NOTICE",
-      "name": "Expiry Date Due Notice",
-      "templateText": "Dear [Member Name], your Turihamwe coverage expires today [Expiry Date]. Please visit [Branch] immediately to execute your annual renewal.",
-      "availableVariables": [
-        "[Member Name]",
-        "[Expiry Date]",
-        "[Branch]"
-      ],
+      "name": "Official Turihamwe Plan Expiry Notice",
+      "templateText": "NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba",
+      "availableVariables": [],
       "isActive": true,
       "createdByUserId": "usr-it-01",
       "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-      "createdAt": "2026-10-19T15:39:07.923Z",
-      "updatedAt": "2026-10-19T15:39:07.923Z"
+      "createdAt": "2026-10-21T14:48:53.123Z",
+      "updatedAt": "2026-10-21T14:48:53.123Z"
     },
     {
       "id": "tmpl-clm-sub",
@@ -997,8 +993,8 @@
       "isActive": true,
       "createdByUserId": "usr-it-01",
       "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-      "createdAt": "2026-10-19T15:39:07.923Z",
-      "updatedAt": "2026-10-19T15:39:07.923Z"
+      "createdAt": "2026-10-21T14:48:53.123Z",
+      "updatedAt": "2026-10-21T14:48:53.123Z"
     },
     {
       "id": "tmpl-clm-docs",
@@ -1014,8 +1010,8 @@
       "isActive": true,
       "createdByUserId": "usr-it-01",
       "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-      "createdAt": "2026-10-19T15:39:07.923Z",
-      "updatedAt": "2026-10-19T15:39:07.923Z"
+      "createdAt": "2026-10-21T14:48:53.123Z",
+      "updatedAt": "2026-10-21T14:48:53.123Z"
     },
     {
       "id": "tmpl-clm-app",
@@ -1031,8 +1027,8 @@
       "isActive": true,
       "createdByUserId": "usr-it-01",
       "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-      "createdAt": "2026-10-19T15:39:07.923Z",
-      "updatedAt": "2026-10-19T15:39:07.923Z"
+      "createdAt": "2026-10-21T14:48:53.123Z",
+      "updatedAt": "2026-10-21T14:48:53.123Z"
     },
     {
       "id": "tmpl-clm-rej",
@@ -1048,8 +1044,8 @@
       "isActive": true,
       "createdByUserId": "usr-it-01",
       "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-      "createdAt": "2026-10-19T15:39:07.923Z",
-      "updatedAt": "2026-10-19T15:39:07.923Z"
+      "createdAt": "2026-10-21T14:48:53.123Z",
+      "updatedAt": "2026-10-21T14:48:53.123Z"
     },
     {
       "id": "tmpl-contrib-rec",
@@ -1067,63 +1063,85 @@
       "isActive": true,
       "createdByUserId": "usr-it-01",
       "createdByUserFullName": "Isaac Tumwesigye (IT Officer)",
-      "createdAt": "2026-10-19T15:39:07.923Z",
-      "updatedAt": "2026-10-19T15:39:07.923Z"
+      "createdAt": "2026-10-21T14:48:53.123Z",
+      "updatedAt": "2026-10-21T14:48:53.123Z"
     }
   ],
-  "smsQueue": [],
+  "smsQueue": [
+    {
+      "id": "sms-1792594136202-euzgr",
+      "eventId": "evt-1792594136201-azzn",
+      "eventReferenceKey": "PLAN_EXPIRY_AUTO::plan-dedup-1792594136200::2026-10-21",
+      "recipientPhone": "+256701555666",
+      "recipientName": "Idempotency Member",
+      "saccoAccountNumber": "NYA-DEDUP-01",
+      "planId": "plan-dedup-1792594136200",
+      "branchId": "br-nya",
+      "branchName": "Nyamuyanja Branch",
+      "messageText": "NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba",
+      "templateCategory": "EXPIRY_DATE_NOTICE",
+      "status": "PENDING",
+      "retryCount": 0,
+      "maxRetries": 3,
+      "provider": "PANDORA",
+      "queuedByUserId": "system",
+      "queuedByUserFullName": "Turihamwe Automated Lifecycle Scheduler",
+      "createdAt": "2026-10-21T14:48:56.202Z",
+      "updatedAt": "2026-10-21T14:48:56.202Z",
+      "isSynced": true
+    },
+    {
+      "id": "sms-1792594136197-zp0qd",
+      "eventId": "evt-1792594136196-ljry",
+      "eventReferenceKey": "PLAN_EXPIRY_AUTO::plan-missed-1792594136195::2026-10-19",
+      "recipientPhone": "+256782333444",
+      "recipientName": "Missed Downtime Member",
+      "saccoAccountNumber": "NYA-MISSED-01",
+      "planId": "plan-missed-1792594136195",
+      "branchId": "br-nya",
+      "branchName": "Nyamuyanja Branch",
+      "messageText": "NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba",
+      "templateCategory": "EXPIRY_DATE_NOTICE",
+      "status": "PENDING",
+      "retryCount": 0,
+      "maxRetries": 3,
+      "provider": "PANDORA",
+      "queuedByUserId": "system",
+      "queuedByUserFullName": "Turihamwe Automated Lifecycle Scheduler",
+      "createdAt": "2026-10-21T14:48:56.197Z",
+      "updatedAt": "2026-10-21T14:48:56.197Z",
+      "isSynced": true
+    },
+    {
+      "id": "sms-1792594136190-hcwft",
+      "eventId": "evt-1792594136190-erx9",
+      "eventReferenceKey": "PLAN_EXPIRY_AUTO::plan-exp-1792594136189::2026-10-21",
+      "recipientPhone": "+256772111222",
+      "recipientName": "Tumuhimbise John",
+      "saccoAccountNumber": "NYA-EXP-1792594136188",
+      "planId": "plan-exp-1792594136189",
+      "branchId": "br-nya",
+      "branchName": "Nyamuyanja Branch",
+      "messageText": "NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba",
+      "templateCategory": "EXPIRY_DATE_NOTICE",
+      "status": "PENDING",
+      "retryCount": 0,
+      "maxRetries": 3,
+      "provider": "PANDORA",
+      "queuedByUserId": "system",
+      "queuedByUserFullName": "Turihamwe Automated Lifecycle Scheduler",
+      "createdAt": "2026-10-21T14:48:56.190Z",
+      "updatedAt": "2026-10-21T14:48:56.190Z",
+      "isSynced": true
+    }
+  ],
   "notificationEvents": [],
   "alerts": [],
   "reportHistory": [],
   "auditLogs": [
     {
-      "id": "aud-1792424350704-b5ba64c2",
-      "timestamp": "2026-10-19T15:39:10.704Z",
-      "userId": "system",
-      "username": "AFRICAS_TALKING_WORKER",
-      "userFullName": "Africa's Talking Background Queue Worker",
-      "branchId": "br-nyamuyanja",
-      "branchName": "Nyamuyanja Branch",
-      "action": "SMS_SENT",
-      "recordType": "SMS",
-      "recordId": "sms-1792424349518-dr0ds",
-      "newValue": "{\"providerMessageId\":\"ATXid_19a7c8c581d517841fbab44bec5ab2e3\",\"costUGX\":35,\"recipientPhone\":\"+256701234567\",\"deliveryStatus\":\"Success\",\"deliveryConfirmed\":false,\"environment\":\"SANDBOX\"}",
-      "reason": "Message submitted to Africa's Talking Sandbox; simulated in virtual dashboard (not routed to physical handset)",
-      "isSynced": true
-    },
-    {
-      "id": "aud-1792424350601-cab1f835",
-      "timestamp": "2026-10-19T15:39:10.601Z",
-      "userId": "system",
-      "username": "AFRICAS_TALKING_WORKER",
-      "userFullName": "Africa's Talking Background Queue Worker",
-      "branchId": "br-nyamuyanja",
-      "branchName": "Nyamuyanja Branch",
-      "action": "SMS_SENT",
-      "recordType": "SMS",
-      "recordId": "sms-1792424349862-7j83g",
-      "newValue": "{\"providerMessageId\":\"ATXid_c2e20921606a3f5cb590d169ebe1a76e\",\"costUGX\":35,\"recipientPhone\":\"+256701234567\",\"deliveryStatus\":\"Success\",\"deliveryConfirmed\":false,\"environment\":\"SANDBOX\"}",
-      "reason": "Message submitted to Africa's Talking Sandbox; simulated in virtual dashboard (not routed to physical handset)",
-      "isSynced": true
-    },
-    {
-      "id": "aud-1792424350447-6d36f5d9",
-      "timestamp": "2026-10-19T15:39:10.447Z",
-      "userId": "system",
-      "username": "AFRICAS_TALKING_WORKER",
-      "userFullName": "Africa's Talking Background Queue Worker",
-      "branchId": "br-nyamuyanja",
-      "branchName": "Nyamuyanja Branch",
-      "action": "SMS_SENT",
-      "recordType": "SMS",
-      "recordId": "sms-1792424350279-qy7ny",
-      "newValue": "{\"providerMessageId\":\"ATXid_284191014723d2a3adf9b5d78ca7410a\",\"costUGX\":35,\"recipientPhone\":\"+256701123456\",\"deliveryStatus\":\"Success\",\"deliveryConfirmed\":false,\"environment\":\"SANDBOX\"}",
-      "reason": "Message submitted to Africa's Talking Sandbox; simulated in virtual dashboard (not routed to physical handset)",
-      "isSynced": true
-    },
-    {
-      "id": "audit-deploy-1792424350360",
-      "timestamp": "2026-10-19T15:39:10.360Z",
+      "id": "audit-deploy-1792594136219",
+      "timestamp": "2026-10-21T14:48:56.219Z",
       "userId": "usr-it-01",
       "username": "itadm",
       "userFullName": "IT Systems Officer",
@@ -1142,14 +1160,12 @@
     "institution.name": "Nyamuyanja SACCO Ltd",
     "system.name": "Turihamwe Management System",
     "system.version": "1.0.0-phase7",
-    "sms.provider": "AFRICAS_TALKING",
+    "sms.provider": "PANDORA",
     "sms.environment": "SANDBOX",
-    "sms.last_submission_time": "2026-10-19T15:39:10.703Z",
-    "sms.last_error_sanitized": "CouldNotRoute: Telecom routing path unavailable. Eligible for retry.",
-    "sms.last_error_time": "2026-10-19T15:39:10.354Z",
-    "sms.last_success_time": "2026-10-19T15:39:10.703Z",
+    "sms.last_error_sanitized": "Pandora SMS submission is not configured on this deployment, so queued messages stay in the queue and are never marked as sent. Provider credentials are held only by the secure backend service, never by this interface.",
+    "sms.last_error_time": "2026-10-21T14:48:56.185Z",
     "deployment.ready": "true",
-    "deployment.clearedAt": "2026-10-19T15:39:10.360Z",
+    "deployment.clearedAt": "2026-10-21T14:48:56.218Z",
     "deployment.status": "READY_FOR_PRODUCTION"
   },
   "businessRulesConfig": {
@@ -1262,17 +1278,17 @@
   },
   "backups": [
     {
-      "id": "BKP-20261019_153910-6ABCAC",
-      "filename": "turihamwe_backup_20261019_153910.json",
-      "createdAt": "2026-10-19T15:39:10.360Z",
-      "sizeBytes": 42203,
-      "checksum": "1f1102817583cb3622066d28604d4778107a2a1776b58a14df00c8af120f673a",
+      "id": "BKP-20261021_144856-08FD8E",
+      "filename": "turihamwe_backup_20261021_144856.json",
+      "createdAt": "2026-10-21T14:48:56.219Z",
+      "sizeBytes": 45325,
+      "checksum": "eed5c66d58cc5b5d15343bdea36059715e859d918b32acf3d42160b48176c147",
       "createdByUserId": "usr-it-01",
       "createdByUsername": "itadm",
       "createdByUserFullName": "IT Systems Officer",
       "type": "MANUAL",
       "status": "VERIFIED",
-      "verifiedAt": "2026-10-19T15:39:10.360Z",
+      "verifiedAt": "2026-10-21T14:48:56.219Z",
       "verifiedByUserId": "usr-it-01",
       "verifiedByUsername": "itadm",
       "verificationDetails": "Cryptographic SHA-256 integrity match; verified on generation.",
@@ -1299,13 +1315,15 @@
     "lastVerificationStatus": "SUCCESS",
     "updatedAt": "2026-01-01T00:00:00.000Z",
     "updatedByUserId": "usr-it-01",
-    "lastBackupAt": "2026-10-19T15:39:10.360Z",
-    "lastVerificationAt": "2026-10-19T15:39:10.360Z"
+    "lastBackupAt": "2026-10-21T14:48:56.219Z",
+    "lastVerificationAt": "2026-10-21T14:48:56.219Z"
   },
   "deletedUserIds": [
-    "usr-test-del-1792424349197"
+    "usr-test-del-1792594134756",
+    "usr-del-1792594136216"
   ],
   "deletedUserUsernames": [
-    "udel1"
+    "udel1",
+    "testdel766"
   ]
 }

@@ -1,0 +1,827 @@
+# MASTER IMPLEMENTATION PROMPT
+
+## TURIHAMWE MANAGEMENT SYSTEM — NYAMUYANJA SACCO LTD, UGANDA
+
+### YOUR ROLE
+
+Act as a senior full-stack software engineer, database architect, cybersecurity specialist, QA engineer, and deployment engineer.
+
+You are working on an existing Turihamwe Management System for Nyamuyanja SACCO Ltd in Uganda.
+
+Your task is to inspect the existing application, implement the five approved project requirements below, test the complete system, fix verified defects that prevent these requirements from working, and prepare the application for deployment.
+
+This is an existing application, not a new project.
+
+**Modify the existing codebase. Do not rebuild the application from scratch.**
+
+Preserve the existing architecture, database, user accounts, permissions, branch configuration, authentication, business rules, reports, audit trails, offline functionality, synchronization, and other working features unless a change is strictly necessary to implement an approved requirement.
+
+Do not introduce unrelated redesigns, speculative features, or new business rules.
+
+---
+
+# PART 1 — MANDATORY INITIAL INSPECTION
+
+Before changing code, inspect the current implementation.
+
+Identify:
+
+1. The frontend framework, backend framework, and application entry points.
+2. The authoritative database and persistence mechanism.
+3. Existing staff authentication, roles, permissions, and branch restrictions.
+4. The member registration and member management workflows.
+5. The beneficiary data model and associated APIs.
+6. The Turihamwe plan registration, renewal, expiry, and reactivation workflows.
+7. The existing SMS provider adapter and configuration.
+8. The SMS queue, scheduler, background worker, retry mechanism, and delivery tracking.
+9. The Uganda timezone implementation.
+10. The audit logging system.
+11. The offline database, synchronization mechanisms, and conflict-resolution behavior.
+12. The existing backup, restoration, and deployment procedures.
+13. Existing automated tests and known unresolved defects.
+
+Trace each relevant feature from the user interface through its API and service layers to persistent storage.
+
+Do not assume a feature works merely because its interface exists.
+
+Identify the authoritative source of truth for each record.
+
+Prepare a short internal implementation plan, then proceed with the approved changes. Do not stop after producing a plan or audit report.
+
+If an essential dependency is unavailable, implement everything that can safely be completed and clearly document the remaining blocker.
+
+---
+
+# PART 2 — REQUIREMENT 1: AUTOMATIC SMS ON PLAN EXPIRY
+
+## Objective
+
+The system must automatically send the approved SMS when a member's Turihamwe plan reaches its recorded expiry date.
+
+Sending must not require a staff member to press a button manually.
+
+## A. Expiry-date accuracy
+
+Use the actual expiry date stored for the Turihamwe plan.
+
+Inspect the existing renewal and expiry logic before implementation.
+
+The scheduler must use the IANA timezone:
+
+Africa/Kampala
+
+Uganda operates on UTC+3 throughout the year.
+
+Do not calculate expiry dates from the member registration date unless that is already the application's documented business rule.
+
+Do not invent or change subscription durations, renewal amounts, benefits, grace periods, or reactivation rules.
+
+Preserve existing business rules for determining a plan's expiry date.
+
+## B. Automatic scheduling
+
+Implement or correct the background scheduling mechanism so that it:
+
+* Detects plans reaching their expiry date.
+* Automatically queues the approved SMS.
+* Runs without manual intervention.
+* Survives application and backend restarts.
+* Recovers after temporary database or provider outages.
+* Works with the existing deployment architecture.
+* Does not depend solely on a browser tab remaining open.
+* Uses the authoritative database rather than frontend-only state.
+
+If multiple backend workers are running, ensure that only one expiry reminder is created for a given plan and expiry event.
+
+## C. Missed reminders and offline recovery
+
+The system must not permanently lose reminders because the application was offline.
+
+When the application resumes, inspect eligible expiry events and queue reminders that should have been sent but were missed.
+
+Send overdue reminders only when their corresponding expiry reminder has not already been sent or successfully submitted.
+
+Do not generate an unbounded backlog of duplicate reminders.
+
+Use durable scheduling state or an equivalent persistent mechanism.
+
+## D. Duplicate prevention
+
+Implement durable idempotency for expiry reminders.
+
+Use a unique event identity based on the relevant plan and expiry event, consistent with the existing data model.
+
+Prevent duplicates caused by:
+
+* Repeated scheduler execution.
+* Backend restarts.
+* Multiple worker processes.
+* Network timeouts.
+* Queue retries.
+* Repeated API requests.
+* Synchronization between branches and the central database.
+
+A timeout does not prove that the provider rejected a message.
+
+If a previous submission has an uncertain outcome, reconcile its status when possible before attempting another submission.
+
+Do not promise exactly-once handset delivery if the provider does not support the mechanisms required to guarantee it.
+
+## E. Message processing
+
+Keep message scheduling, queue processing, and actual provider communication as separate responsibilities.
+
+Record the plan, recipient, expiry event, scheduled time, attempts, provider response, and final known status.
+
+Do not log SMS credentials or expose unnecessary personal information.
+
+## F. Expiry reminder acceptance criteria
+
+Verify that:
+
+1. A plan expiring today is detected correctly.
+2. The SMS is queued automatically.
+3. A plan expiring in the future is not reminded prematurely.
+4. Repeated scheduler executions do not create duplicate events.
+5. Restarting the backend does not lose scheduled reminders.
+6. An overdue unsent reminder is recovered after downtime.
+7. An already processed expiry event is not scheduled again.
+8. A renewed plan uses its updated expiry event correctly.
+9. Failed submissions follow the retry policy.
+10. All date calculations respect Africa/Kampala.
+
+Use simulated dates and mocked provider requests for automated tests.
+
+Do not send bulk SMS during testing.
+
+---
+
+# PART 3 — REQUIREMENT 2: EXACT APPROVED SMS TEMPLATE
+
+The approved expiry reminder is:
+
+NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba
+
+This wording is approved by the project owner.
+
+## Mandatory rules
+
+1. Preserve the exact wording, spelling, capitalization, and punctuation.
+2. Do not translate, paraphrase, correct, or automatically rewrite the text.
+3. Do not append additional promotional messages.
+4. Do not silently replace it with an existing generic reminder.
+5. Store the template through the existing template-management architecture or an appropriate persistent configuration mechanism.
+6. Use this template for the automatic plan-expiry reminder.
+7. Preserve unrelated existing SMS templates.
+8. Do not create a second competing expiry template.
+
+Check whether the message's character encoding causes it to be sent as one SMS segment or multiple segments.
+
+Report the expected SMS segmentation and possible cost implications without altering the approved wording.
+
+If the existing SMS configuration supports editing templates, ensure that only appropriately authorized staff can modify the approved template.
+
+Automated tests must compare the outgoing message against the exact approved text.
+
+---
+
+# PART 4 — REQUIREMENT 3: BENEFICIARIES DURING NEW MEMBER REGISTRATION
+
+## Objective
+
+The new member registration form must allow staff to register a member and enter the member's beneficiaries in the same workflow.
+
+## A. Beneficiary fields
+
+Each beneficiary must have the following fields:
+
+1. Full name.
+2. Date of birth.
+3. Relationship to the member.
+
+Provide a clear interface for adding multiple beneficiaries.
+
+Staff must be able to add or remove beneficiary entries before submitting the registration.
+
+Validate required fields and dates.
+
+Reject invalid dates, including dates in the future, unless the existing approved business rules explicitly support an exception.
+
+Do not invent beneficiary eligibility rules or age restrictions.
+
+## B. Data persistence
+
+Save the member and their beneficiaries consistently.
+
+Each beneficiary must be linked to the correct member using the existing relationship and database conventions.
+
+A successful member registration must not leave orphaned beneficiary records.
+
+Use database transactions where supported so that partial registration failures are handled safely.
+
+If registration fails, show a clear error and allow the authorized user to correct and resubmit the form without accidentally creating duplicate members or beneficiaries.
+
+Do not generate a second SACCO account number for an existing member.
+
+Preserve the existing SACCO account number as the primary member identifier.
+
+## C. Existing member management
+
+Ensure beneficiaries can be viewed in the member's profile.
+
+Preserve existing beneficiary records when unrelated member details are edited.
+
+Support authorized beneficiary corrections and updates in accordance with existing permissions, audit requirements, and the five-day member-editing rule.
+
+Do not bypass the controlled correction process for records outside the permitted editing period.
+
+Record beneficiary additions, changes, and removals in the audit trail.
+
+Preserve historical records required by claims and other existing workflows.
+
+## D. Acceptance criteria
+
+Test that:
+
+* A member can be registered with no beneficiaries if existing rules permit it.
+* A member can be registered with one beneficiary.
+* A member can be registered with multiple beneficiaries.
+* Each beneficiary's name, date of birth, and relationship persist correctly.
+* Beneficiaries appear under the correct member account.
+* Invalid entries are rejected with clear messages.
+* Failed registrations do not create inconsistent records.
+* Existing members and beneficiaries remain unchanged unless explicitly edited.
+* Existing permissions and correction restrictions remain enforced.
+
+---
+
+# PART 5 — REQUIREMENT 4: ALIVE OR DECEASED CLIENT STATUS
+
+## Objective
+
+Every applicable client/member record must have a clear status indicating whether the client is alive or deceased.
+
+The interface must allow an authorized user to select the appropriate status using a checkbox, toggle, radio selection, or equivalent clear control.
+
+Use two explicit states:
+
+* ALIVE
+* DECEASED
+
+Do not make an unchecked checkbox ambiguously mean deceased.
+
+The displayed status must be understandable to staff.
+
+## A. Default status
+
+Inspect existing records and registration logic.
+
+For new members, initialize the status to ALIVE only if this is consistent with the existing business process.
+
+For existing records, migrate or initialize missing status values safely without overwriting an already recorded deceased status.
+
+Do not assume every legacy record is alive if reliable historical information says otherwise.
+
+If existing records cannot be classified reliably, handle missing values explicitly and report the limitation rather than inventing facts.
+
+## B. Status changes
+
+When an authorized staff member changes a client's status:
+
+* Persist the change to the authoritative database.
+* Update the interface only after the server confirms the change.
+* Record the previous and new status.
+* Record the responsible staff account and timestamp.
+* Apply existing role and branch permissions.
+* Prevent unauthorized changes.
+* Display clear success or failure feedback.
+
+Use the application's existing audit logging conventions.
+
+## C. Deceased-client behavior
+
+Marking a client DECEASED must not physically delete the client.
+
+Do not automatically delete beneficiaries, claims, financial records, historical membership information, or audit entries.
+
+Do not automatically close or deactivate related records unless the existing approved business rules explicitly require that action for the relevant circumstances.
+
+Preserve the distinction between:
+
+* A beneficiary being deceased.
+* A primary member/account owner being deceased.
+* A staff user account being deleted.
+
+These are different entities and workflows.
+
+Do not apply the account-owner death workflow merely because a beneficiary is marked deceased.
+
+Preserve existing Turihamwe claims and benefit rules.
+
+## D. Acceptance criteria
+
+Verify that:
+
+1. New members receive the correct initial status.
+2. Existing deceased statuses are preserved.
+3. Authorized users can change status.
+4. Unauthorized users cannot change status.
+5. Status persists after refresh and backend restart.
+6. Status changes are audited.
+7. Marking a client deceased does not delete historical records.
+8. Member status is clearly visible in the member profile and appropriate lists.
+9. The status of a beneficiary does not accidentally change the status of the primary member.
+
+---
+
+# PART 6 — REQUIREMENT 5: MIGRATE FROM AFRICA'S TALKING TO PANDORA SMS
+
+## Objective
+
+Pandora SMS is the intended SMS provider for Turihamwe.
+
+Replace Africa's Talking as the active sending provider after the Pandora integration is implemented and verified.
+
+Do not rebuild the existing SMS subsystem.
+
+## A. Inspect Pandora's official API
+
+Use the provider's official documentation:
+
+https://sms.thepandoranetworks.com/api
+
+Confirm the current API contract before writing the integration.
+
+Verify the documented:
+
+* API endpoint.
+* Authentication method.
+* Required request parameters.
+* Sender ID requirements.
+* Uganda recipient-number format.
+* Success and failure responses.
+* Rate limits, if documented.
+* Balance inquiry capability, if available.
+* Delivery receipt capability, if available.
+* Retry guidance and duplicate-submission implications.
+
+Do not invent endpoints, authentication schemes, parameters, or response codes.
+
+If the official documentation is inaccessible, identify the exact missing information rather than guessing.
+
+## B. Implement a dedicated provider adapter
+
+Create or update the Pandora adapter according to the existing architecture.
+
+Keep provider-specific request handling separate from the general SMS queue and scheduling services.
+
+The adapter must:
+
+* Submit SMS through the documented Pandora API.
+* Validate and normalize Ugandan phone numbers.
+* Handle HTTP errors, provider rejection, timeouts, and malformed responses.
+* Return normalized internal statuses.
+* Sanitize sensitive errors.
+* Support safe diagnostics.
+* Handle uncertain submission outcomes without blindly resending messages.
+
+Reuse the existing SMS service, queue worker, scheduler, reminder templates, and audit infrastructure wherever possible.
+
+Do not create a competing SMS queue.
+
+## C. Secure configuration
+
+Store Pandora credentials on the backend only.
+
+Use the application's existing secure configuration mechanism.
+
+Do not expose credentials through:
+
+* Frontend source code.
+* VITE environment variables.
+* Browser storage.
+* Public API responses.
+* Client-side logs.
+* Error notifications.
+* Source control.
+
+Do not ask the project owner to paste secrets into chat or source code.
+
+If credentials are not yet configured, provide exact instructions for setting them through the appropriate secure configuration interface.
+
+Never fabricate credentials or pretend that a connection test succeeded without running it.
+
+## D. Sender ID
+
+The desired sender identity is:
+
+NYAMUYANJA SACCO LTD
+
+Determine whether Pandora permits this full name or requires a shorter approved sender ID.
+
+If a shorter sender ID is necessary, recommend an appropriate option such as NYAMUYANJA, subject to provider rules and approval.
+
+Do not assume that configuring a sender ID guarantees it will appear on the recipient's phone.
+
+Document any registration or approval required for Ugandan MTN and Airtel networks.
+
+## E. Preserve the existing SMS pipeline
+
+Preserve:
+
+* Existing reminder templates.
+* Queue records.
+* Retry history.
+* Duplicate protection.
+* Scheduling logic.
+* Audit logs.
+* SMS dashboard functionality.
+* Administrative diagnostics.
+* Existing message status conventions.
+
+Preserve the existing bounded retry policy unless a specific provider requirement justifies a documented change.
+
+Do not retry indefinitely.
+
+Do not treat an HTTP success response as proof of handset delivery.
+
+Use normalized statuses such as:
+
+QUEUED
+PROCESSING
+SUBMITTED
+DELIVERED
+FAILED
+UNKNOWN
+
+Map statuses only when the provider's documented responses support that mapping.
+
+If delivery receipts are unavailable, explain the limitation clearly.
+
+## F. Provider migration
+
+Make Pandora the intended active provider, but do not enable production sending until its credentials, configuration, and authorized test delivery have been verified.
+
+During implementation:
+
+1. Keep the Africa's Talking integration available until Pandora passes the required checks.
+2. Prevent both providers from sending the same queued event.
+3. Ensure only the deliberately selected provider processes each message.
+4. Do not automatically fall back to Africa's Talking after an ambiguous Pandora timeout.
+5. Do not resend messages merely because the provider configuration changed.
+6. Do not send bulk SMS during migration.
+7. Preserve existing queue records and message history.
+8. Document how the active provider is selected.
+
+Once Pandora is verified and the authorized migration is complete, disable Africa's Talking as the active sending provider.
+
+Retain only the fallback capability that is justified by the existing architecture and approved operational requirements.
+
+Do not delete historical Africa's Talking logs or credentials records that are required for auditing. Remove obsolete secrets from active configuration only through the proper secure procedure.
+
+## G. Pandora testing
+
+Use mocked HTTP responses for automated tests.
+
+Test:
+
+* Successful submission.
+* Authentication failure.
+* Invalid phone number.
+* Provider rejection.
+* Rate limiting where applicable.
+* Network timeout.
+* Malformed provider response.
+* Duplicate event prevention.
+* Retry scheduling.
+* Ambiguous submission outcomes.
+* Credential redaction.
+* Correct sender ID submission.
+* Accurate status mapping.
+* Preservation of existing queue records.
+
+Do not send real SMS during automated tests.
+
+Conduct any live test only to an explicitly authorized recipient after credentials and provider configuration have been confirmed.
+
+Verify actual handset receipt before claiming that end-to-end delivery works.
+
+---
+
+# PART 7 — TIMEZONE AND SYSTEM TIME
+
+Use Africa/Kampala as the authoritative display and business timezone where local calendar dates are required.
+
+Requirements:
+
+* Display the current Ugandan date and time accurately.
+* Use consistent timestamp storage conventions.
+* Avoid converting the same timestamp twice.
+* Preserve historical timestamps.
+* Calculate expiry events using the actual stored plan expiry dates.
+* Ensure background scheduling works across midnight, month-end, and year-end.
+* Ensure reports use the appropriate Ugandan local date boundaries.
+* Do not treat the computer's local timezone as authoritative when it differs from Africa/Kampala.
+
+If the system is offline, do not claim that an SMS was sent while no connection to the provider was available.
+
+Record pending work durably and process it when connectivity returns.
+
+---
+
+# PART 8 — PERSISTENCE, USER DELETION, AND DATABASE INTEGRITY
+
+The application has previously experienced a staff-account deletion persistence problem in which deleted accounts could reappear after refresh or restart.
+
+Inspect the current implementation and verify that this issue is genuinely resolved.
+
+Do not assume an earlier report proves the fix is working.
+
+Confirm that:
+
+* Deletions are durably persisted.
+* Seed routines do not recreate deliberately deleted accounts.
+* Tombstones or equivalent deletion records survive restart and restoration where supported.
+* Deleted staff cannot authenticate using existing sessions or tokens.
+* User listing APIs consistently exclude deleted accounts.
+* Offline synchronization cannot resurrect stale deleted accounts.
+* Audit history remains available.
+* Persistence failures are reported correctly.
+
+Use disposable test users.
+
+Do not delete or modify any real staff account during testing.
+
+Apply the same persistence discipline to the new SMS scheduling, beneficiary records, and client status changes.
+
+---
+
+# PART 9 — SECURITY AND ACCESS CONTROL
+
+Preserve existing authorization rules.
+
+Do not weaken authentication or branch restrictions.
+
+Maintain the existing branch-based login workflow and user-role model.
+
+Apply server-side authorization to every new or modified endpoint.
+
+Ensure that frontend controls are not treated as the sole enforcement of permissions.
+
+Preserve the existing five-day member-editing rule and controlled correction process.
+
+Protect sensitive member information and SMS credentials.
+
+Validate all API inputs.
+
+Prevent duplicate submissions, unauthorized modifications, and inconsistent database state.
+
+Record security-relevant administrative changes in the audit trail.
+
+Do not change existing credentials, reset passwords, delete accounts, or alter staff permissions as part of this implementation.
+
+---
+
+# PART 10 — DATABASE MIGRATION AND BACKUP SAFETY
+
+Before making database changes:
+
+1. Identify the authoritative database.
+2. Inspect the current schema and migration system.
+3. Confirm how the application backs up and restores operational data.
+4. Create or verify a recoverable backup using the existing supported mechanism.
+5. Use backward-compatible migrations where practical.
+6. Preserve existing member, beneficiary, claim, financial, staff, and audit records.
+7. Ensure new fields have safe migration behavior.
+8. Ensure failed migrations do not leave the application in an inconsistent state.
+
+Do not replace the database with a clean demo database.
+
+Do not reset operational data.
+
+Do not run destructive test scripts against the real database.
+
+Do not silently alter the meaning of existing records.
+
+If the database cannot safely be migrated in the current environment, stop the destructive operation, explain the blocker, and preserve the existing data.
+
+---
+
+# PART 11 — END-TO-END TESTING
+
+Create or update automated tests and execute the relevant existing test suites.
+
+Test the integrated application, not just isolated functions.
+
+## Required test groups
+
+### A. Automatic expiry SMS
+
+* Correct expiry-date detection.
+* Correct Uganda timezone.
+* Automatic scheduling.
+* Durable queue persistence.
+* Recovery after downtime.
+* Duplicate prevention.
+* Renewal and new-expiry handling.
+* Retry and failure handling.
+
+### B. Exact SMS template
+
+* Exact approved wording.
+* No unintended modification.
+* Correct template selection.
+* Correct recipient selection.
+* Character encoding and segmentation.
+
+### C. Beneficiary registration
+
+* One beneficiary.
+* Multiple beneficiaries.
+* Field validation.
+* Correct database relationships.
+* Transaction safety.
+* Member profile display.
+* Audit logging.
+* Preservation of existing records.
+
+### D. Client status
+
+* Alive status.
+* Deceased status.
+* Authorized changes.
+* Unauthorized changes rejected.
+* Persistent changes.
+* Audit history.
+* No accidental deletion of linked records.
+
+### E. Pandora SMS
+
+* Provider authentication.
+* Correct request structure.
+* Ugandan number handling.
+* Sender ID handling.
+* Success and error responses.
+* Queue integration.
+* Retry behavior.
+* Duplicate protection.
+* Delivery-status accuracy.
+* Credential security.
+
+### F. Existing application regression
+
+Verify that the following still work:
+
+* Staff login.
+* Role and permission enforcement.
+* Branch restrictions.
+* Member search.
+* Member registration and editing.
+* Beneficiary management.
+* Turihamwe plans and renewals.
+* Existing claim workflows.
+* Existing reports.
+* Audit logging.
+* SMS dashboard and queue.
+* User management.
+* Offline operation and synchronization.
+* Database persistence.
+* Backend restart.
+* Existing backup and restoration procedures.
+
+Use isolated test fixtures and mocked SMS requests.
+
+Do not send real SMS during automated tests.
+
+Do not claim tests passed unless they were actually executed.
+
+Do not conceal failures or skip existing tests merely to produce a passing result.
+
+---
+
+# PART 12 — DEPLOYMENT READINESS
+
+After implementation and testing, perform a deployment-readiness assessment.
+
+Inspect:
+
+* Production build.
+* TypeScript or equivalent static checks.
+* Automated test results.
+* Database migrations.
+* Database backup and restoration.
+* Authentication and permissions.
+* Secure environment configuration.
+* Pandora credentials and sender ID status.
+* Scheduler startup and recovery.
+* Background worker reliability.
+* Duplicate prevention.
+* Logging and error monitoring.
+* Offline synchronization.
+* Persistent deletion safeguards.
+* Production configuration.
+* Startup and shutdown behavior.
+* Recovery from temporary provider outages.
+
+Verify that the application can restart without losing queued reminders, beneficiaries, client status, or account-deletion records.
+
+Do not enable live production SMS merely because the build succeeds.
+
+Production sending requires valid Pandora credentials, verified configuration, appropriate sender ID approval, and an authorized live delivery test.
+
+Do not deploy automatically, publish secrets, or perform destructive production operations without authorization.
+
+Prepare the system for deployment and identify any remaining external setup requirements.
+
+---
+
+# PART 13 — REQUIRED FINAL REPORT
+
+After implementation, provide a factual report containing:
+
+## 1. Requirements
+
+List each of the five approved requirements and state whether it is:
+
+* Implemented and tested.
+* Implemented but not fully verified.
+* Blocked by a missing dependency or external approval.
+* Not implemented.
+
+## 2. Files changed
+
+List the significant files created or modified and explain their purpose.
+
+## 3. Database changes
+
+Explain the schema changes, migrations, persistence mechanisms, and backup safety.
+
+## 4. SMS migration
+
+Report:
+
+* The Pandora API integration status.
+* Whether secure credentials are configured.
+* Whether a connection test succeeded.
+* Whether the sender ID is approved.
+* Whether a live test message was received.
+* Whether delivery receipts are available.
+* Any remaining provider limitations.
+
+## 5. Automatic scheduling
+
+Demonstrate how expiry events are detected, queued, retried, and recovered after downtime.
+
+## 6. Beneficiary registration
+
+Demonstrate that beneficiary records persist and remain associated with the correct member.
+
+## 7. Alive/deceased status
+
+Demonstrate that status changes persist and are audited.
+
+## 8. Deletion persistence
+
+Report the actual verification results for staff-account deletion across refresh, restart, startup seeding, and synchronization.
+
+## 9. Testing
+
+Report the actual number of tests executed, passed, failed, and skipped.
+
+Include build and static-check results.
+
+Do not invent successful test results.
+
+## 10. Deployment readiness
+
+Provide a clear verdict:
+
+* READY FOR DEPLOYMENT
+* READY AFTER SPECIFIED EXTERNAL CONFIGURATION
+* NOT READY
+
+Explain the evidence supporting the verdict and list every outstanding blocker.
+
+---
+
+# FINAL EXECUTION INSTRUCTIONS
+
+Implement the five approved project requirements in the existing application.
+
+Do not stop at planning or explaining.
+
+Inspect the code, make the necessary changes, run the tests, fix verified defects, and prepare the deployment-readiness report.
+
+Preserve all existing operational data and unrelated functionality.
+
+Do not delete real staff accounts or member records.
+
+Do not send bulk SMS.
+
+Do not expose credentials.
+
+Do not claim that external provider operations succeeded without evidence.
+
+Do not make unrelated architectural or visual changes.
+
+The objective is a reliable, secure, tested Turihamwe Management System for Nyamuyanja SACCO Ltd that is ready for a controlled deployment.

@@ -19,6 +19,7 @@ import { MemberAdminPermissionsTestRunner } from './memberAdminPermissions.test'
 import { runRecordPropagationTests } from './recordPropagationAcrossSystem.test';
 import { runLiveAudit } from './liveAuditSuite';
 import { runAfricasTalkingSuite } from './africasTalkingDeliveryPipeline.test';
+import { runMasterVerificationSuite } from './masterImplementationVerification.test';
 import { serverStore } from '../server/storage/serverStore';
 
 async function main() {
@@ -196,6 +197,22 @@ async function main() {
     console.error("Africa's Talking suite execution error:", err.message);
     hasAnyFailure = true;
   }
+  console.log('');
+
+  // 10. Master Implementation Verification Suite (5 Approved Requirements & Part 8)
+  try {
+    const masterResult = await runMasterVerificationSuite();
+    grandTotal += masterResult.total;
+    grandPassed += masterResult.passedCount;
+    grandFailed += masterResult.failedCount;
+    if (!masterResult.passed) {
+      hasAnyFailure = true;
+    }
+  } catch (err: any) {
+    console.error('Master implementation verification suite execution error:', err.message);
+    hasAnyFailure = true;
+  }
+
   // Reset SEED_TEST_DATA and purge test fixtures so operational database remains clean for production
   delete process.env.SEED_TEST_DATA;
   serverStore.clearAllOperationalData('usr-it-01', 'itadm');

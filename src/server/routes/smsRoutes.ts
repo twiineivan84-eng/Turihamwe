@@ -1,9 +1,11 @@
 import { Router, Response } from 'express';
 import { requireAuth, requirePermission, AuthenticatedRequest } from '../middleware/auth';
 import { serverStore } from '../storage/serverStore';
+import { config } from '../config';
 import { AuditService } from '../services/auditService';
 import { SmsService } from '../services/smsService';
 import { AfricasTalkingAdapter } from '../services/africasTalkingAdapter';
+import { PandoraAdapter } from '../services/pandoraAdapter';
 import { smsQueueWorker } from '../services/smsQueueWorker';
 import { SmsTemplate, SmsMessage } from '../../types';
 
@@ -296,12 +298,62 @@ smsRouter.get('/diagnostics', requirePermission('sms.view_queue'), (_req: Authen
 });
 
 // ==========================================
+// 10B. GET / SET ACTIVE PROVIDER
+// ==========================================
+smsRouter.get('/provider', requirePermission('sms.view_queue'), (_req: AuthenticatedRequest, res: Response) => {
+  const activeProvider = serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA';
+  res.json({
+    success: true,
+    provider: activeProvider,
+    activeSenderId: activeProvider === 'PANDORA' ? config.sms.pandora.senderId : config.sms.senderId,
+  });
+});
+
+smsRouter.post('/provider', requirePermission('admin.system_settings'), (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const workingBranch = req.workingBranch;
+  const { provider } = req.body;
+
+  if (!['PANDORA', 'AFRICAS_TALKING'].includes(provider)) {
+    res.status(400).json({ success: false, error: "Invalid provider. Must be 'PANDORA' or 'AFRICAS_TALKING'." });
+    return;
+  }
+
+  serverStore.updateSystemSettings({ 'sms.provider': provider });
+
+  AuditService.log({
+    userId: user.id,
+    username: user.username,
+    userFullName: user.fullName,
+    branchId: workingBranch?.id || 'ALL',
+    branchName: workingBranch?.name || 'Central Head Office',
+    action: 'SYSTEM_SETTING_CHANGED',
+    recordType: 'SMS',
+    recordId: 'sms.provider',
+    newValue: provider,
+    reason: `Switched active SMS dispatch provider to ${provider}`,
+  });
+
+  res.json({
+    success: true,
+    provider,
+    message: `Active SMS gateway provider successfully switched to ${provider}.`,
+  });
+});
+
+// ==========================================
 // 11. TEST PROVIDER CONNECTION (SAFE: NO SMS SENT)
 // ==========================================
-smsRouter.post('/test-connection', requirePermission('sms.view_queue'), async (_req: AuthenticatedRequest, res: Response) => {
-  const result = await AfricasTalkingAdapter.testConnection();
+smsRouter.post('/test-connection', requirePermission('sms.view_queue'), async (req: AuthenticatedRequest, res: Response) => {
+  const targetProvider = (req.body?.provider || serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA') as 'PANDORA' | 'AFRICAS_TALKING';
+
+  const result = targetProvider === 'PANDORA'
+    ? await PandoraAdapter.testConnection()
+    : await AfricasTalkingAdapter.testConnection();
+
   res.json({
     success: result.connected,
+    provider: targetProvider,
     data: result,
     message: result.message,
   });
@@ -326,18 +378,23 @@ smsRouter.post('/test-send', requirePermission('sms.send'), async (req: Authenti
   }
 
   const formattedPhone = SmsService.formatUgandanPhone(recipientPhone);
-  const validation = AfricasTalkingAdapter.validateConfiguration();
+  const activeProvider = (req.body?.provider || serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA') as 'PANDORA' | 'AFRICAS_TALKING';
+
+  const validation = activeProvider === 'PANDORA'
+    ? PandoraAdapter.validateConfiguration()
+    : AfricasTalkingAdapter.validateConfiguration();
 
   if (!validation.canSubmit) {
     res.status(400).json({
       success: false,
       error: validation.message,
       configurationStatus: validation.status,
+      provider: activeProvider,
     });
     return;
   }
 
-  const testMessageText = `[ADMIN DIAGNOSTIC TEST] Nyamuyanja SACCO Turihamwe SMS delivery test via Africa's Talking ${validation.environment} at ${new Date().toLocaleTimeString()}.`;
+  const testMessageText = `[ADMIN DIAGNOSTIC TEST] Nyamuyanja SACCO Turihamwe SMS delivery test via ${activeProvider === 'PANDORA' ? 'Pandora Networks' : "Africa's Talking"} at ${new Date().toLocaleTimeString()}.`;
 
   const queueResult = SmsService.queueMessage({
     recipientPhone: formattedPhone,

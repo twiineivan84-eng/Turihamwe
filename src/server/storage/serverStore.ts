@@ -203,7 +203,7 @@ class ServerStore {
       'institution.name': 'Nyamuyanja SACCO Ltd',
       'system.name': 'Turihamwe Management System',
       'system.version': '1.0.0-phase7',
-      'sms.provider': 'AFRICAS_TALKING',
+      'sms.provider': 'PANDORA',
       'sms.environment': 'SANDBOX',
     },
     businessRulesConfig: { ...DEFAULT_BUSINESS_RULES },
@@ -283,6 +283,11 @@ class ServerStore {
       }
     }
 
+    // Durably purge any deleted users from in-memory state
+    this.state.users = (this.state.users || []).filter(
+      u => !this.isUserDeleted(u.id) && !this.isUserDeleted(u.username)
+    );
+
     // Ensure strict SACCO account number uniqueness across members
     const seenAccs = new Set<string>();
     this.state.members = this.state.members.filter(m => {
@@ -291,6 +296,13 @@ class ServerStore {
       seenAccs.add(acc);
       return true;
     });
+
+    // Requirement 4: Safe migration/initialization of member clientStatus (ALIVE or DECEASED)
+    for (const m of this.state.members) {
+      if (!m.clientStatus) {
+        m.clientStatus = 'ALIVE';
+      }
+    }
 
     // Ensure referential integrity: Plans must belong to an existing SACCO member
     this.state.plans = this.state.plans.filter(p =>
@@ -828,15 +840,21 @@ class ServerStore {
 
   // Users
   public getUsers(): User[] {
-    return this.state.users;
+    return this.state.users.filter(u => !this.isUserDeleted(u.id) && !this.isUserDeleted(u.username));
   }
 
   public getUserById(id: string): User | undefined {
-    return this.state.users.find(u => u.id === id);
+    if (this.isUserDeleted(id)) return undefined;
+    const user = this.state.users.find(u => u.id === id);
+    if (user && this.isUserDeleted(user.username)) return undefined;
+    return user;
   }
 
   public getUserByUsername(username: string): User | undefined {
-    return this.state.users.find(u => u.username.toLowerCase() === username.toLowerCase());
+    if (this.isUserDeleted(username)) return undefined;
+    const user = this.state.users.find(u => u.username.toLowerCase() === username.toLowerCase());
+    if (user && this.isUserDeleted(user.id)) return undefined;
+    return user;
   }
 
   public addUser(user: User): void {
@@ -1212,6 +1230,34 @@ class ServerStore {
     }
     this.save();
     return this.state.beneficiaries[idx];
+  }
+
+  public addBeneficiaries(beneficiaries: Beneficiary[]): void {
+    if (!beneficiaries || beneficiaries.length === 0) return;
+    for (const b of beneficiaries) {
+      this.state.beneficiaries.push(b);
+      const plan = this.state.plans.find(p => p.id === b.planId);
+      if (plan) {
+        plan.beneficiaryCount = this.state.beneficiaries.filter(x => x.planId === b.planId && x.isActive).length;
+        plan.updatedAt = new Date().toISOString();
+      }
+    }
+    this.save();
+  }
+
+  public deleteBeneficiary(id: string): boolean {
+    const idx = this.state.beneficiaries.findIndex(b => b.id === id);
+    if (idx === -1) return false;
+    const b = this.state.beneficiaries[idx];
+    b.isActive = false;
+    b.updatedAt = new Date().toISOString();
+    const plan = this.state.plans.find(p => p.id === b.planId);
+    if (plan) {
+      plan.beneficiaryCount = this.state.beneficiaries.filter(x => x.planId === b.planId && x.isActive).length;
+      plan.updatedAt = new Date().toISOString();
+    }
+    this.save();
+    return true;
   }
 
   // Contributions
@@ -2101,7 +2147,11 @@ class ServerStore {
   // PHASE 7: SYSTEM CONFIGURATION & SETTINGS
   // ==========================================
   public getSystemSettings(): Record<string, string> {
-    return this.state.systemSettings;
+    return this.state.systemSettings || {};
+  }
+
+  public getSystemSetting(key: string): string | undefined {
+    return this.state.systemSettings ? this.state.systemSettings[key] : undefined;
   }
 
   public updateSystemSettings(updates: Record<string, string>): Record<string, string> {
@@ -2168,6 +2218,8 @@ class ServerStore {
         auditLogs: this.state.auditLogs,
         systemSettings: this.state.systemSettings,
         businessRulesConfig: this.state.businessRulesConfig,
+        deletedUserIds: this.state.deletedUserIds || [],
+        deletedUserUsernames: this.state.deletedUserUsernames || [],
       },
     };
 
@@ -2385,8 +2437,8 @@ class ServerStore {
         businessRulesConfig: parsed.data.businessRulesConfig || this.state.businessRulesConfig,
         backups: currentBackups,
         backupConfig: currentBackupConfig,
-        deletedUserIds: this.state.deletedUserIds || [],
-        deletedUserUsernames: this.state.deletedUserUsernames || [],
+        deletedUserIds: Array.from(new Set([...(this.state.deletedUserIds || []), ...((parsed.data.deletedUserIds as string[]) || [])])),
+        deletedUserUsernames: Array.from(new Set([...(this.state.deletedUserUsernames || []), ...((parsed.data.deletedUserUsernames as string[]) || [])])),
       };
 
       backup.status = 'RESTORED';

@@ -79,6 +79,19 @@ export const MembersView: React.FC<MembersViewProps> = ({
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  // Registration Beneficiaries & Client Status
+  const [regBeneficiaries, setRegBeneficiaries] = useState<
+    Array<{ fullName: string; dateOfBirth: string; relationship: string; nationalIdNumber?: string; contactPhone?: string }>
+  >([]);
+  const [regClientStatus, setRegClientStatus] = useState<'ALIVE' | 'DECEASED'>('ALIVE');
+
+  // Client Status Management Modal
+  const [showStatusModal, setShowStatusModal] = useState<boolean>(false);
+  const [statusTargetMember, setStatusTargetMember] = useState<SaccoMember | null>(null);
+  const [newClientStatus, setNewClientStatus] = useState<'ALIVE' | 'DECEASED'>('ALIVE');
+  const [clientStatusReason, setClientStatusReason] = useState<string>('');
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState<boolean>(false);
+
   // Registration & Normal Edit form state
   const [formData, setFormData] = useState({
     saccoAccountNumber: '',
@@ -222,6 +235,12 @@ export const MembersView: React.FC<MembersViewProps> = ({
         if (res.success && res.data) {
           setMemberCorrections(res.data.corrections || []);
           setMemberAuditHistory(res.data.auditLogs || []);
+          if ((res.data as any).beneficiaries) {
+            setMemberBeneficiaries((res.data as any).beneficiaries);
+          }
+          if ((res.data as any).clientStatus) {
+            setSelectedMember(prev => prev ? { ...prev, ...(res.data as any) } : res.data);
+          }
         } else {
           const logs = await fetchLocalAudit();
           setMemberAuditHistory(logs);
@@ -259,8 +278,17 @@ export const MembersView: React.FC<MembersViewProps> = ({
       }
       setMemberPlan(loadedPlan);
 
-      if (loadedPlan) {
-        if (isOnline) {
+      if (isOnline) {
+        // Fetch explicit member beneficiaries route
+        const benRes = await fetch(`/api/members/${encodeURIComponent(memberToLoad.saccoAccountNumber)}/beneficiaries`, {
+          headers: authHeaders,
+        });
+        if (benRes.ok) {
+          const benData = await benRes.json();
+          if (benData.success && Array.isArray(benData.data)) {
+            setMemberBeneficiaries(benData.data);
+          }
+        } else if (loadedPlan) {
           const planDetailsRes = await fetch(`/api/turihamwe/plans/${loadedPlan.id}`, { headers: authHeaders });
           if (planDetailsRes.ok) {
             const pData = await planDetailsRes.json();
@@ -268,12 +296,12 @@ export const MembersView: React.FC<MembersViewProps> = ({
               setMemberBeneficiaries(pData.beneficiaries);
             }
           }
-        } else {
-          const bList = await localDb.beneficiaries.where('saccoAccountNumber').equals(memberToLoad.saccoAccountNumber).toArray();
-          setMemberBeneficiaries(bList);
         }
       } else {
-        setMemberBeneficiaries([]);
+        const bList = await localDb.beneficiaries.where('saccoAccountNumber').equals(memberToLoad.saccoAccountNumber).toArray();
+        if (bList.length > 0) {
+          setMemberBeneficiaries(bList);
+        }
       }
     } catch {
       const localPlan = await localDb.plans.where('saccoAccountNumber').equals(memberToLoad.saccoAccountNumber).first();
@@ -482,6 +510,32 @@ export const MembersView: React.FC<MembersViewProps> = ({
       return;
     }
 
+    // Validate registration beneficiaries if provided
+    for (let i = 0; i < regBeneficiaries.length; i++) {
+      const b = regBeneficiaries[i];
+      if (!b.fullName.trim()) {
+        setNotification({ type: 'error', message: `Beneficiary #${i + 1}: Full legal name is required.` });
+        return;
+      }
+      if (!b.dateOfBirth) {
+        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): Date of birth is required.` });
+        return;
+      }
+      const bDobTime = new Date(b.dateOfBirth).getTime();
+      if (isNaN(bDobTime)) {
+        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): Date of birth is invalid.` });
+        return;
+      }
+      if (bDobTime > Date.now()) {
+        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): Date of birth cannot be in the future.` });
+        return;
+      }
+      if (!b.relationship.trim()) {
+        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): Relationship to member is required.` });
+        return;
+      }
+    }
+
     const cleanAccountNo = formData.saccoAccountNumber.trim().toUpperCase();
 
     // 1. Account Number Rule: Check duplicate locally
@@ -520,6 +574,10 @@ export const MembersView: React.FC<MembersViewProps> = ({
       registrationDate: formData.registrationDate || new Date().toISOString().split('T')[0],
       branchId: targetBranchId,
       branchName: branchEntity?.name,
+      clientStatus: regClientStatus,
+      clientStatusUpdatedAt: new Date().toISOString(),
+      clientStatusUpdatedByUserId: user?.id,
+      clientStatusUpdatedByUsername: user?.username,
       createdById: user?.id,
       createdByUsername: user?.username,
       isLockedFromNormalEdit: false,
@@ -532,7 +590,16 @@ export const MembersView: React.FC<MembersViewProps> = ({
     let savedOnline = false;
     if (isOnline) {
       try {
-        const res = await apiClient.registerMember(newMember);
+        const res = await apiClient.registerMember({
+          ...newMember,
+          beneficiaries: regBeneficiaries.map((b, idx) => ({
+            fullName: b.fullName.trim(),
+            dateOfBirth: b.dateOfBirth,
+            relationship: b.relationship.trim(),
+            nationalIdNumber: b.nationalIdNumber?.trim() || undefined,
+            contactPhone: b.contactPhone?.trim() || undefined,
+          })),
+        });
         if (res.success && res.data) {
           savedOnline = true;
         }
@@ -551,6 +618,26 @@ export const MembersView: React.FC<MembersViewProps> = ({
     // Persist locally in SQLite/Dexie
     await localDb.members.put(newMember);
 
+    // Save beneficiaries locally
+    for (let i = 0; i < regBeneficiaries.length; i++) {
+      const b = regBeneficiaries[i];
+      const localBen: Beneficiary = {
+        id: `ben-local-${Date.now()}-${i}`,
+        saccoAccountNumber: cleanAccountNo,
+        planId: '',
+        fullName: b.fullName.trim(),
+        relationship: b.relationship.trim(),
+        dateOfBirth: b.dateOfBirth,
+        nationalIdNumber: b.nationalIdNumber?.trim() || undefined,
+        contactPhone: b.contactPhone?.trim() || undefined,
+        percentageAllocation: Math.floor(100 / (regBeneficiaries.length || 1)),
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await localDb.beneficiaries.put(localBen);
+    }
+
     // Record audit log
     await LocalRepository.recordLocalAudit({
       userId: user!.id,
@@ -561,7 +648,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
       action: 'MEMBER_CREATED',
       recordType: 'MEMBERS',
       recordId: newMember.saccoAccountNumber,
-      newValue: `Registered member ${newMember.fullName} (A/C: ${newMember.saccoAccountNumber}) at ${branchEntity?.name}`,
+      newValue: `Registered member ${newMember.fullName} (A/C: ${newMember.saccoAccountNumber}, Status: ${newMember.clientStatus}) with ${regBeneficiaries.length} beneficiaries at ${branchEntity?.name}`,
     });
 
     if (!savedOnline) {
@@ -569,7 +656,10 @@ export const MembersView: React.FC<MembersViewProps> = ({
         entityType: 'MEMBER',
         entityId: newMember.saccoAccountNumber,
         operation: 'INSERT',
-        payload: newMember,
+        payload: {
+          ...newMember,
+          beneficiaries: regBeneficiaries,
+        },
         branchId: targetBranchId,
         userId: user!.id,
       });
@@ -581,8 +671,8 @@ export const MembersView: React.FC<MembersViewProps> = ({
     setNotification({
       type: 'success',
       message: savedOnline
-        ? `Member ${newMember.fullName} (${newMember.saccoAccountNumber}) registered and synchronized successfully.`
-        : `Member ${newMember.fullName} (${newMember.saccoAccountNumber}) registered locally. Queued for automatic background synchronization.`,
+        ? `Member ${newMember.fullName} (${newMember.saccoAccountNumber}) registered with status ${newMember.clientStatus} and ${regBeneficiaries.length} beneficiaries.`
+        : `Member ${newMember.fullName} (${newMember.saccoAccountNumber}) registered locally. Queued for background synchronization.`,
     });
 
     // Reset form
@@ -602,7 +692,64 @@ export const MembersView: React.FC<MembersViewProps> = ({
       branchId: workingBranch?.id || '',
       registrationDate: new Date().toISOString().split('T')[0],
     });
+    setRegBeneficiaries([]);
+    setRegClientStatus('ALIVE');
     setFormErrors({});
+  };
+
+  // Explicit Client Status handler (ALIVE / DECEASED with audit log)
+  const handleUpdateClientStatusSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!statusTargetMember) return;
+    if (!clientStatusReason.trim()) {
+      setNotification({ type: 'error', message: 'An audit reason is required to modify client status.' });
+      return;
+    }
+
+    setIsUpdatingStatus(true);
+    try {
+      const res = await apiClient.updateMemberClientStatus(
+        statusTargetMember.saccoAccountNumber,
+        newClientStatus,
+        clientStatusReason.trim()
+      );
+
+      if (res.success) {
+        const updatedMember: SaccoMember = {
+          ...statusTargetMember,
+          clientStatus: newClientStatus,
+          clientStatusReason: clientStatusReason.trim(),
+          clientStatusUpdatedAt: new Date().toISOString(),
+          clientStatusUpdatedByUsername: user?.username,
+          clientStatusUpdatedByUserId: user?.id,
+        };
+
+        // Persist locally
+        await localDb.members.put(updatedMember);
+
+        // Update state
+        setMembers(prev => prev.map(m => (m.saccoAccountNumber === updatedMember.saccoAccountNumber ? updatedMember : m)));
+        if (selectedMember?.saccoAccountNumber === updatedMember.saccoAccountNumber) {
+          setSelectedMember(updatedMember);
+        }
+
+        setNotification({
+          type: 'success',
+          message: `Client status for ${updatedMember.fullName} (${updatedMember.saccoAccountNumber}) successfully updated to ${newClientStatus}.`,
+        });
+        setShowStatusModal(false);
+        setStatusTargetMember(null);
+        setClientStatusReason('');
+        notifyRecordChanged('MEMBER', 'UPDATED', updatedMember.saccoAccountNumber, updatedMember);
+      } else {
+        setNotification({ type: 'error', message: res.message || 'Failed to update client status.' });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error updating client status.';
+      setNotification({ type: 'error', message: msg });
+    } finally {
+      setIsUpdatingStatus(false);
+    }
   };
 
   // Normal Edit handler (within 5-day rule)
@@ -1097,6 +1244,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
                 <th className="px-6 py-3">Member Name</th>
                 <th className="px-6 py-3">Branch</th>
                 <th className="px-6 py-3">Registration Date</th>
+                <th className="px-6 py-3">Client Status</th>
                 <th className="px-6 py-3">Turihamwe Status</th>
                 <th className="px-6 py-3">Editing Status</th>
                 <th className="px-6 py-3 text-right">Actions</th>
@@ -1105,14 +1253,14 @@ export const MembersView: React.FC<MembersViewProps> = ({
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-slate-400">
+                  <td colSpan={8} className="px-6 py-8 text-center text-slate-400">
                     <RefreshCw className="w-4 h-4 animate-spin inline-block mr-2" />
                     Loading member records...
                   </td>
                 </tr>
               ) : members.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-slate-500">
+                  <td colSpan={8} className="px-6 py-8 text-center text-slate-500">
                     No SACCO member records found matching the query.
                   </td>
                 </tr>
@@ -1133,6 +1281,17 @@ export const MembersView: React.FC<MembersViewProps> = ({
                       </td>
                       <td className="px-6 py-3.5 font-mono text-slate-600">
                         {member.registrationDate}
+                      </td>
+                      <td className="px-6 py-3.5">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            (member.clientStatus || 'ALIVE') === 'ALIVE'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : 'bg-rose-50 text-rose-800 border-rose-200'
+                          }`}
+                        >
+                          {(member.clientStatus || 'ALIVE') === 'ALIVE' ? 'ALIVE' : 'DECEASED'}
+                        </span>
                       </td>
                       <td className="px-6 py-3.5">
                         <span
@@ -1217,9 +1376,37 @@ export const MembersView: React.FC<MembersViewProps> = ({
                     <span className="font-mono text-xs font-bold text-blue-800 px-2 py-0.5 rounded bg-blue-50 border border-blue-200">
                       {selectedMember.saccoAccountNumber}
                     </span>
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold border ${
+                        (selectedMember.clientStatus || 'ALIVE') === 'ALIVE'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-rose-50 text-rose-800 border-rose-200'
+                      }`}
+                    >
+                      {(selectedMember.clientStatus || 'ALIVE') === 'ALIVE' ? '● ALIVE' : '● DECEASED'}
+                    </span>
+                    {canEdit && (
+                      <button
+                        onClick={() => {
+                          setStatusTargetMember(selectedMember);
+                          setNewClientStatus((selectedMember.clientStatus || 'ALIVE') === 'ALIVE' ? 'DECEASED' : 'ALIVE');
+                          setClientStatusReason('');
+                          setShowStatusModal(true);
+                        }}
+                        className="text-[11px] font-semibold px-2 py-0.5 rounded border border-slate-300 hover:bg-slate-100 text-slate-700 transition"
+                        title="Authorized update of member vital client status (ALIVE / DECEASED)"
+                      >
+                        Change Status
+                      </button>
+                    )}
                   </div>
                   <p className="text-xs text-slate-500">
                     Nyamuyanja SACCO Ltd • Branch: {selectedMember.branchName || workingBranch?.name}
+                    {selectedMember.clientStatusReason && (
+                      <span className="ml-2 text-[11px] text-amber-700 italic">
+                        (Status note: {selectedMember.clientStatusReason})
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -2498,6 +2685,214 @@ export const MembersView: React.FC<MembersViewProps> = ({
                 </div>
               </div>
 
+              {/* VITAL CLIENT STATUS */}
+              <div className="space-y-3 pt-2">
+                <h3 className="font-bold text-slate-800 uppercase tracking-wider text-[11px] pb-1 border-b">
+                  Vital Client Status (Specification Requirement)
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition ${
+                      regClientStatus === 'ALIVE'
+                        ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/30'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="regClientStatus"
+                      value="ALIVE"
+                      checked={regClientStatus === 'ALIVE'}
+                      onChange={() => setRegClientStatus('ALIVE')}
+                      className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div>
+                      <span className="font-bold text-slate-900 block text-xs">ALIVE (Standard Active Member)</span>
+                      <span className="text-[11px] text-slate-500">
+                        Client is alive, operational, and in regular standing with Nyamuyanja SACCO.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition ${
+                      regClientStatus === 'DECEASED'
+                        ? 'bg-rose-50 border-rose-300 ring-2 ring-rose-500/30'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="regClientStatus"
+                      value="DECEASED"
+                      checked={regClientStatus === 'DECEASED'}
+                      onChange={() => setRegClientStatus('DECEASED')}
+                      className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                    />
+                    <div>
+                      <span className="font-bold text-slate-900 block text-xs">DECEASED (Recorded Deceased)</span>
+                      <span className="text-[11px] text-slate-500">
+                        Client is confirmed deceased. Historical data and claims records are preserved.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* BENEFICIARIES REGISTRATION */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between pb-1 border-b">
+                  <div>
+                    <h3 className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
+                      Beneficiary Enrolment (Optional, Multiple Allowed)
+                    </h3>
+                    <p className="text-[10px] text-slate-500">
+                      Enrol family beneficiaries during member registration. Future dates of birth are strictly rejected.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegBeneficiaries(prev => [
+                        ...prev,
+                        {
+                          fullName: '',
+                          dateOfBirth: '',
+                          relationship: 'Spouse',
+                          nationalIdNumber: '',
+                          contactPhone: '',
+                        },
+                      ]);
+                    }}
+                    className="px-2.5 py-1 text-xs font-semibold rounded bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition"
+                  >
+                    + Add Beneficiary
+                  </button>
+                </div>
+
+                {regBeneficiaries.length === 0 ? (
+                  <div className="p-3 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-center text-slate-500 text-[11px]">
+                    No beneficiaries added yet. Click <strong>+ Add Beneficiary</strong> to record scheme beneficiaries now, or add them later.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {regBeneficiaries.map((b, idx) => (
+                      <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2 relative">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-[11px] text-slate-700">Beneficiary #{idx + 1}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRegBeneficiaries(prev => prev.filter((_, i) => i !== idx));
+                            }}
+                            className="text-red-600 hover:text-red-800 text-[11px] font-semibold"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                              Full Legal Name *
+                            </label>
+                            <input
+                              type="text"
+                              value={b.fullName}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setRegBeneficiaries(prev =>
+                                  prev.map((item, i) => (i === idx ? { ...item, fullName: val } : item))
+                                );
+                              }}
+                              placeholder="e.g. Tumwine Sarah"
+                              required
+                              className="w-full p-1.5 border border-slate-300 rounded bg-white text-slate-900 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                              Relationship *
+                            </label>
+                            <select
+                              value={b.relationship}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setRegBeneficiaries(prev =>
+                                  prev.map((item, i) => (i === idx ? { ...item, relationship: val } : item))
+                                );
+                              }}
+                              className="w-full p-1.5 border border-slate-300 rounded bg-white text-slate-900 text-xs"
+                            >
+                              <option value="Spouse">Spouse</option>
+                              <option value="Child">Child</option>
+                              <option value="Parent">Parent</option>
+                              <option value="Sibling">Sibling</option>
+                              <option value="Relative">Relative</option>
+                              <option value="Dependent">Dependent</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                              Date of Birth *
+                            </label>
+                            <input
+                              type="date"
+                              value={b.dateOfBirth}
+                              max={new Date().toISOString().split('T')[0]}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setRegBeneficiaries(prev =>
+                                  prev.map((item, i) => (i === idx ? { ...item, dateOfBirth: val } : item))
+                                );
+                              }}
+                              required
+                              className="w-full p-1.5 border border-slate-300 rounded bg-white text-slate-900 text-xs"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                              National ID (Optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={b.nationalIdNumber || ''}
+                              onChange={e => {
+                                const val = e.target.value.toUpperCase();
+                                setRegBeneficiaries(prev =>
+                                  prev.map((item, i) => (i === idx ? { ...item, nationalIdNumber: val } : item))
+                                );
+                              }}
+                              placeholder="e.g. CF90012345XYZ"
+                              className="w-full p-1.5 border border-slate-300 rounded bg-white text-slate-900 text-xs font-mono uppercase"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                              Contact Phone (Optional)
+                            </label>
+                            <input
+                              type="tel"
+                              value={b.contactPhone || ''}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setRegBeneficiaries(prev =>
+                                  prev.map((item, i) => (i === idx ? { ...item, contactPhone: val } : item))
+                                );
+                              }}
+                              placeholder="+256700000000"
+                              className="w-full p-1.5 border border-slate-300 rounded bg-white text-slate-900 text-xs font-mono"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* SYSTEM INFORMATION (Branch Rule Enforcement) */}
               <div className="space-y-3 pt-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <h3 className="font-bold text-slate-800 uppercase tracking-wider text-[11px] pb-1 border-b border-slate-200">
@@ -2649,6 +3044,126 @@ export const MembersView: React.FC<MembersViewProps> = ({
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Client Status Update Modal (ALIVE / DECEASED) */}
+      {showStatusModal && statusTargetMember && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-blue-700" />
+                <h3 className="text-sm font-bold text-slate-900">Update Client Status</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowStatusModal(false);
+                  setStatusTargetMember(null);
+                  setClientStatusReason('');
+                }}
+                className="text-slate-500 hover:text-slate-800 text-xs font-semibold px-2 py-1 rounded"
+              >
+                Close
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateClientStatusSubmit} className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
+                <div><span className="text-slate-500">Member:</span> <strong className="text-slate-900">{statusTargetMember.fullName}</strong></div>
+                <div><span className="text-slate-500">SACCO Account:</span> <strong className="font-mono text-blue-700">{statusTargetMember.saccoAccountNumber}</strong></div>
+                <div>
+                  <span className="text-slate-500">Current Status:</span>{' '}
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${(statusTargetMember.clientStatus || 'ALIVE') === 'ALIVE' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'}`}>
+                    {statusTargetMember.clientStatus || 'ALIVE'}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-800 mb-2">
+                  New Client Vital Status *
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label
+                    className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition ${
+                      newClientStatus === 'ALIVE'
+                        ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/20'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="newClientStatus"
+                      value="ALIVE"
+                      checked={newClientStatus === 'ALIVE'}
+                      onChange={() => setNewClientStatus('ALIVE')}
+                      className="text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="font-bold text-slate-900 text-xs">ALIVE</span>
+                  </label>
+
+                  <label
+                    className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition ${
+                      newClientStatus === 'DECEASED'
+                        ? 'bg-rose-50 border-rose-300 ring-2 ring-rose-500/20'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="newClientStatus"
+                      value="DECEASED"
+                      checked={newClientStatus === 'DECEASED'}
+                      onChange={() => setNewClientStatus('DECEASED')}
+                      className="text-rose-600 focus:ring-rose-500"
+                    />
+                    <span className="font-bold text-slate-900 text-xs">DECEASED</span>
+                  </label>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Note: Marking a client DECEASED preserves all historical records, claims, plans, and audit trails. No data is physically deleted.
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-800 mb-1">
+                  Mandatory Audit Reason / Justification *
+                </label>
+                <textarea
+                  value={clientStatusReason}
+                  onChange={e => setClientStatusReason(e.target.value)}
+                  placeholder="e.g. Verified death notification certificate submitted by family member / Chief of Nyamuyanja"
+                  required
+                  rows={3}
+                  className="w-full p-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowStatusModal(false);
+                    setStatusTargetMember(null);
+                    setClientStatusReason('');
+                  }}
+                  disabled={isUpdatingStatus}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingStatus || !clientStatusReason.trim()}
+                  className="px-5 py-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg shadow-xs transition disabled:opacity-50"
+                >
+                  {isUpdatingStatus ? 'Saving Status...' : 'Apply Status Change'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

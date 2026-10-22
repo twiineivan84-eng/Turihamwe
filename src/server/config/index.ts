@@ -40,12 +40,22 @@ export interface DatabaseConfig {
   dataFile: string;
 }
 
+export interface PandoraConfig {
+  apiUrl: string;
+  balanceUrl: string;
+  username: string;
+  password?: string;
+  senderId: string;
+}
+
 export interface SmsConfig {
   enabled: boolean;
+  provider: 'AFRICAS_TALKING' | 'PANDORA';
   environment: 'SANDBOX' | 'PRODUCTION';
   username: string;
   apiKey?: string;
   senderId: string;
+  pandora: PandoraConfig;
 }
 
 export interface StorageConfig {
@@ -118,14 +128,23 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
   const dataFile = path.resolve(dataDir, env.DATA_FILE_NAME || 'turihamwe_central_db.json');
   const sqlitePath = env.SQLITE_DATABASE_PATH || path.resolve(dataDir, 'turihamwe-local.sqlite');
 
-  // Africa's Talking SMS Configuration
+  // SMS Gateway Configuration (Active: Pandora Networks | Fallback: Africa's Talking)
   const smsEnabled = env.SMS_ENABLED !== 'false';
+  const smsProvider = (env.SMS_PROVIDER === 'AFRICAS_TALKING' ? 'AFRICAS_TALKING' : 'PANDORA') as 'AFRICAS_TALKING' | 'PANDORA';
   const smsEnv = (env.SMS_ENVIRONMENT === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX') as 'SANDBOX' | 'PRODUCTION';
   const atUsername = env.AT_USERNAME || 'sandbox';
   const atApiKey = env.AT_API_KEY || env.AFRICAS_TALKING_API_KEY;
   const atSenderId = env.AT_SENDER_ID || 'TURIHAMWE';
 
-  if (isProduction && smsEnabled && smsEnv === 'PRODUCTION') {
+  // Pandora Networks SMS (Primary Intended Provider for Nyamuyanja SACCO Ltd, Uganda)
+  const pandoraApiUrl = env.PANDORA_SMS_API_URL || 'https://www.sms.thepandoranetworks.com/API/send_sms/';
+  const pandoraBalanceUrl = env.PANDORA_SMS_BALANCE_URL || 'https://www.sms.thepandoranetworks.com/API/balance_inquiry.php';
+  const pandoraUsername = env.PANDORA_SMS_USERNAME || '';
+  const pandoraPassword = env.PANDORA_SMS_PASSWORD || '';
+  // Maximum 11 characters GSM alphanumeric sender ID (e.g. NYAMUYANJA)
+  const pandoraSenderId = env.PANDORA_SMS_SENDER_ID || 'NYAMUYANJA';
+
+  if (isProduction && smsEnabled && smsProvider === 'AFRICAS_TALKING' && smsEnv === 'PRODUCTION') {
     if (!atApiKey) {
       throw new ConfigurationError('AT_API_KEY', 'Missing required environment variable: AT_API_KEY is required when SMS_ENVIRONMENT is set to PRODUCTION.');
     }
@@ -175,10 +194,18 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
     },
     sms: {
       enabled: smsEnabled,
+      provider: smsProvider,
       environment: smsEnv,
       username: atUsername,
       apiKey: atApiKey,
       senderId: atSenderId,
+      pandora: {
+        apiUrl: pandoraApiUrl,
+        balanceUrl: pandoraBalanceUrl,
+        username: pandoraUsername,
+        password: pandoraPassword,
+        senderId: pandoraSenderId,
+      },
     },
     storage: {
       uploadPath,

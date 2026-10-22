@@ -245,10 +245,29 @@ class ApiClient {
     return this.request(`/members/${encodeURIComponent(accountNumber)}`);
   }
 
-  public async registerMember(memberData: Partial<SaccoMember>): Promise<{ success: boolean; data: SaccoMember }> {
+  public async registerMember(memberData: Partial<SaccoMember> & {
+    beneficiaries?: Array<{
+      fullName: string;
+      dateOfBirth: string;
+      relationship: string;
+      nationalIdNumber?: string;
+      contactPhone?: string;
+    }>;
+  }): Promise<{ success: boolean; data: SaccoMember }> {
     return this.request('/members', {
       method: 'POST',
       body: JSON.stringify(memberData),
+    });
+  }
+
+  public async updateMemberClientStatus(
+    accountNumber: string,
+    status: 'ALIVE' | 'DECEASED',
+    reason?: string
+  ): Promise<{ success: boolean; data: SaccoMember; message?: string }> {
+    return this.request(`/members/${encodeURIComponent(accountNumber)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ clientStatus: status, reason }),
     });
   }
 
@@ -953,7 +972,26 @@ class ApiClient {
     return this.request('/sms/diagnostics');
   }
 
-  public async testSmsConnection(): Promise<{
+  public async getSmsProvider(): Promise<{
+    success: boolean;
+    provider: 'PANDORA' | 'AFRICAS_TALKING';
+    activeSenderId: string;
+  }> {
+    return this.request('/sms/provider');
+  }
+
+  public async setSmsProvider(provider: 'PANDORA' | 'AFRICAS_TALKING'): Promise<{
+    success: boolean;
+    provider: 'PANDORA' | 'AFRICAS_TALKING';
+    message: string;
+  }> {
+    return this.request('/sms/provider', {
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    });
+  }
+
+  public async testSmsConnection(provider?: 'PANDORA' | 'AFRICAS_TALKING'): Promise<{
     success: boolean;
     data: {
       connected: boolean;
@@ -967,6 +1005,7 @@ class ApiClient {
   }> {
     return this.request('/sms/test-connection', {
       method: 'POST',
+      body: JSON.stringify(provider ? { provider } : {}),
     });
   }
 

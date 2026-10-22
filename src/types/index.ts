@@ -155,6 +155,7 @@ export type AuditAction =
   | 'BRANCH_SWITCH'
   | 'MEMBER_CREATED'
   | 'MEMBER_EDITED'
+  | 'MEMBER_STATUS_CHANGED'
   | 'MEMBER_DELETED'
   | 'MEMBER_DEACTIVATED'
   | 'MEMBER_CORRECTION'
@@ -261,6 +262,11 @@ export interface SaccoMember {
   createdByUsername?: string;
   isLockedFromNormalEdit?: boolean;
   turihamweStatus?: 'ACTIVE' | 'EXPIRED' | 'UNREGISTERED' | 'SUSPENDED';
+  clientStatus?: 'ALIVE' | 'DECEASED'; // Explicit client vitality status (default: ALIVE)
+  clientStatusUpdatedAt?: string;
+  clientStatusUpdatedByUserId?: string;
+  clientStatusUpdatedByUsername?: string;
+  clientStatusReason?: string;
   isDeleted?: boolean;
   deletedAt?: string;
   deletedByUserId?: string;
@@ -725,7 +731,7 @@ export interface SmsMessage {
   sentAt?: string;
   failedAt?: string;
   failureReason?: string;
-  provider: 'AFRICAS_TALKING';
+  provider: 'AFRICAS_TALKING' | 'PANDORA';
   providerMessageId?: string;
   providerCostUGX?: number;
   deliveryStatus?: string;
@@ -760,7 +766,7 @@ export type SmsConfigurationStatus = 'CONFIGURED' | 'MISSING' | 'INVALID' | 'DIS
 export type SmsWorkerStatus = 'RUNNING' | 'STOPPED' | 'PAUSED';
 
 export interface SmsProviderDiagnostics {
-  provider: "Africa's Talking";
+  provider: "Africa's Talking" | "Pandora Networks";
   environment: 'SANDBOX' | 'PRODUCTION';
   configurationStatus: SmsConfigurationStatus;
   configurationMessage: string;

@@ -578,9 +578,9 @@ export class SeedService {
           id: 'tmpl-exp-due',
           code: 'EXPIRY_DATE_NOTICE',
           category: 'EXPIRY_DATE_NOTICE' as const,
-          name: 'Expiry Date Due Notice',
-          templateText: 'Dear [Member Name], your Turihamwe coverage expires today [Expiry Date]. Please visit [Branch] immediately to execute your annual renewal.',
-          availableVariables: ['[Member Name]', '[Expiry Date]', '[Branch]'],
+          name: 'Official Turihamwe Plan Expiry Notice',
+          templateText: 'NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba',
+          availableVariables: [],
           isActive: true,
           createdByUserId: 'usr-it-01',
           createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
@@ -656,6 +656,14 @@ export class SeedService {
 
       for (const t of defaultTemplates) {
         serverStore.addSmsTemplate(t);
+      }
+    } else {
+      // Ensure approved expiry notice template is synchronized
+      const existingDueTmpl = serverStore.getSmsTemplates().find(t => t.category === 'EXPIRY_DATE_NOTICE' || t.code === 'EXPIRY_DATE_NOTICE');
+      if (existingDueTmpl && existingDueTmpl.templateText !== 'NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba') {
+        existingDueTmpl.templateText = 'NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba';
+        existingDueTmpl.name = 'Official Turihamwe Plan Expiry Notice';
+        serverStore.updateSmsTemplate(existingDueTmpl);
       }
     }
 
