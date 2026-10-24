@@ -152,6 +152,9 @@ export async function runAfricasTalkingSuite(): Promise<{
 
     const passed = isRunning && intervalSeconds > 0 && diagnostics.provider === "Africa's Talking";
 
+    // Cleanly stop worker so background loop doesn't race against subsequent test suites
+    smsQueueWorker.stop();
+
     results.push({
       id: 4,
       name: 'Queue Worker Startup and Lifecycle',
@@ -602,6 +605,12 @@ export async function runAfricasTalkingSuite(): Promise<{
   // TEST 15: Safe Connection Test Without Live SMS
   // ==========================================
   try {
+    // Stop background worker ticks during mock to isolate testConnection from background worker cycles
+    smsQueueWorker.stop();
+    while ((smsQueueWorker as any).isProcessing) {
+      await new Promise(r => setTimeout(r, 20));
+    }
+
     config.sms.enabled = true;
     config.sms.environment = 'SANDBOX';
     config.sms.apiKey = 'atsk_test_key_balance';

@@ -167,6 +167,7 @@ export type AuditAction =
   | 'RENEWAL_RECORDED'
   | 'RENEWAL_CORRECTED'
   | 'PLAN_REGISTERED'
+  | 'PLAN_UPDATED'
   | 'PLAN_REACTIVATED'
   | 'PLAN_STATUS_CHANGED'
   | 'REACTIVATION_ATTEMPT_REJECTED'
@@ -318,6 +319,8 @@ export type TurihamwePlanStatus =
   | 'REACTIVATION_PENDING'
   | 'CANCELLED';
 
+export type TurihamweRegistrationType = 'Fresh Registration' | 'Renewal';
+
 export interface TurihamwePlan {
   id: string; // e.g. "PLN-NYA-001042"
   saccoAccountNumber: string; // Strictly linked to existing SACCO member
@@ -327,6 +330,12 @@ export interface TurihamwePlan {
   enrolmentDate: string;
   effectiveStartDate: string;
   currentExpiryDate: string;
+  // Record-Keeping Enhancement fields (Part A)
+  registrationType?: TurihamweRegistrationType;
+  registrationDate?: string; // Manually editable historical date
+  expiryDate?: string; // Manually editable expiry date
+  contributionAmount?: number; // Nonnegative UGX record-keeping entry
+  isRecordKeepingOnly?: boolean; // True when contribution is administrative record only
   lastRenewalDate?: string;
   registeredBranchId: string;
   registeredBranchName?: string;
@@ -1017,7 +1026,7 @@ export interface SystemHealthMetrics {
   };
   smsGateway: {
     status: 'OPERATIONAL' | 'DEGRADED' | 'DISCONNECTED';
-    provider: 'AFRICAS_TALKING';
+    provider: 'PANDORA';
     pendingCount: number;
     sentCount: number;
     failedCount: number;

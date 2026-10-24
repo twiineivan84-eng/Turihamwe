@@ -2,7 +2,6 @@ import { SmsMessage, SmsTemplate, NotificationEvent, TurihamwePlan, SaccoMember,
 import { serverStore } from '../storage/serverStore';
 import { AuditService } from './auditService';
 import { config } from '../config';
-import { AfricasTalkingAdapter } from './africasTalkingAdapter';
 import { PandoraAdapter } from './pandoraAdapter';
 import { smsQueueWorker } from './smsQueueWorker';
 import { diffInUgandaCalendarDays, getUgandaDateString } from '../../utils/timezone';
@@ -97,7 +96,7 @@ export class SmsService {
       status: 'PENDING',
       retryCount: 0,
       maxRetries: 3,
-      provider: (serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA') as 'AFRICAS_TALKING' | 'PANDORA',
+      provider: 'PANDORA',
       queuedByUserId: params.queuedByUserId,
       queuedByUserFullName: params.queuedByUserFullName,
       createdAt: new Date().toISOString(),
@@ -141,12 +140,10 @@ export class SmsService {
       return { success: true, message: sms };
     }
 
-    const activeProvider = (sms.provider || serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA') as 'AFRICAS_TALKING' | 'PANDORA';
+    const activeProvider = 'PANDORA';
 
     // 1. Provider configuration validation
-    const validation = activeProvider === 'PANDORA'
-      ? PandoraAdapter.validateConfiguration()
-      : AfricasTalkingAdapter.validateConfiguration();
+    const validation = PandoraAdapter.validateConfiguration();
 
     if (!validation.canSubmit) {
       // Retain queued messages in PENDING without claiming they are sent
@@ -169,31 +166,24 @@ export class SmsService {
 
     // Mark as SENDING while in transit
     sms.status = 'SENDING';
-    sms.provider = activeProvider;
+    sms.provider = 'PANDORA';
     sms.lastAttemptAt = new Date().toISOString();
     sms.updatedAt = new Date().toISOString();
     serverStore.updateSmsMessage(sms);
 
     // 2. Provider submission
-    const submission = activeProvider === 'PANDORA'
-      ? await PandoraAdapter.submitMessage({
-          to: sms.recipientPhone,
-          messageText: sms.messageText,
-          senderId: config.sms.pandora.senderId,
-        })
-      : await AfricasTalkingAdapter.submitMessage({
-          to: sms.recipientPhone,
-          messageText: sms.messageText,
-          senderId: config.sms.senderId,
-        });
+    const submission = await PandoraAdapter.submitMessage({
+      to: sms.recipientPhone,
+      messageText: sms.messageText,
+      senderId: config.sms.pandora.senderId,
+    });
 
     if (submission.success) {
-      const isSandbox = config.sms.environment === 'SANDBOX' && activeProvider === 'AFRICAS_TALKING';
       sms.status = 'SENT';
       sms.sentAt = new Date().toISOString();
       sms.providerMessageId = submission.providerMessageId;
       sms.providerCostUGX = submission.costUGX || 30.0;
-      sms.deliveryStatus = submission.deliveryStatus || (isSandbox ? 'SimulatedSandbox' : 'Submitted');
+      sms.deliveryStatus = submission.deliveryStatus || 'Submitted';
       sms.deliveryConfirmed = false;
       sms.failureReason = undefined;
       sms.nextRetryAt = undefined;
@@ -209,8 +199,8 @@ export class SmsService {
 
       AuditService.log({
         userId: 'system',
-        username: activeProvider === 'PANDORA' ? 'PANDORA_GATEWAY' : 'AFRICAS_TALKING_GATEWAY',
-        userFullName: activeProvider === 'PANDORA' ? 'Pandora SMS Gateway' : "Africa's Talking SMS Gateway",
+        username: 'PANDORA_GATEWAY',
+        userFullName: 'Pandora SMS Gateway',
         branchId: sms.branchId,
         branchName: sms.branchName,
         action: 'SMS_SENT',
@@ -222,13 +212,9 @@ export class SmsService {
           recipient: sms.recipientPhone,
           deliveryStatus: sms.deliveryStatus,
           deliveryConfirmed: false,
-          provider: activeProvider,
+          provider: 'PANDORA',
         }),
-        reason: activeProvider === 'PANDORA'
-          ? 'SMS submitted to Pandora Networks telecommunications gateway in Uganda'
-          : isSandbox
-          ? "SMS accepted by Africa's Talking Sandbox; routed to virtual simulator (not physical GSM handset)"
-          : "SMS accepted by Africa's Talking gateway; queued for mobile telecom dispatch",
+        reason: 'SMS submitted to Pandora Networks telecommunications gateway in Uganda',
       });
 
       return { success: true, message: sms };
@@ -282,7 +268,7 @@ export class SmsService {
       AuditService.log({
         userId: 'system',
         username: 'SMS_GATEWAY',
-        userFullName: activeProvider === 'PANDORA' ? 'Pandora SMS Gateway' : "Africa's Talking Gateway",
+        userFullName: 'Pandora SMS Gateway',
         branchId: sms.branchId,
         branchName: sms.branchName,
         action: 'SMS_FAILED',
@@ -476,8 +462,8 @@ export class SmsService {
 
       AuditService.log({
         userId: 'system',
-        username: 'AFRICAS_TALKING_DLR',
-        userFullName: "Africa's Talking Delivery Receipt",
+        username: 'PANDORA_DLR',
+        userFullName: 'Pandora Delivery Receipt',
         branchId: existingMessage.branchId,
         branchName: existingMessage.branchName,
         action: 'SMS_DELIVERY_CONFIRMED',
@@ -495,7 +481,7 @@ export class SmsService {
       existingMessage.deliveryStatus = normalizedStatus;
       existingMessage.deliveryConfirmed = false;
       existingMessage.status = 'FAILED';
-      const reasonText = AfricasTalkingAdapter.sanitizeError(
+      const reasonText = PandoraAdapter.sanitizeError(
         failureReason || `Telco delivery failure: ${normalizedStatus} (Network: ${networkCode || 'N/A'})`
       );
       existingMessage.failureReason = reasonText;
@@ -505,8 +491,8 @@ export class SmsService {
 
       AuditService.log({
         userId: 'system',
-        username: 'AFRICAS_TALKING_DLR',
-        userFullName: "Africa's Talking Delivery Receipt",
+        username: 'PANDORA_DLR',
+        userFullName: 'Pandora Delivery Receipt',
         branchId: existingMessage.branchId,
         branchName: existingMessage.branchName,
         action: 'SMS_DELIVERY_FAILED',

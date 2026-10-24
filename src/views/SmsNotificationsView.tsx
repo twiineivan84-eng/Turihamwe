@@ -95,9 +95,8 @@ export const SmsNotificationsView: React.FC = () => {
   const [testSendPhone, setTestSendPhone] = useState<string>('+256701234567');
   const [isTestSending, setIsTestSending] = useState<boolean>(false);
 
-  // Active Provider State
-  const [activeProvider, setActiveProvider] = useState<'PANDORA' | 'AFRICAS_TALKING'>('PANDORA');
-  const [isSwitchingProvider, setIsSwitchingProvider] = useState<boolean>(false);
+  // Active Provider State: Pandora Networks is the exclusive provider
+  const activeProvider = 'PANDORA';
 
   // Manual Compose State
   const [membersList, setMembersList] = useState<SaccoMember[]>([]);
@@ -110,32 +109,11 @@ export const SmsNotificationsView: React.FC = () => {
   const [isSubmittingSms, setIsSubmittingSms] = useState<boolean>(false);
 
   const fetchActiveProvider = async () => {
-    try {
-      const res = await apiClient.getSmsProvider();
-      if (res.success && res.provider) {
-        setActiveProvider(res.provider);
-      }
-    } catch {
-      // ignore
-    }
+    // Pandora is the exclusive provider
   };
 
-  const handleSwitchProvider = async (targetProvider: 'PANDORA' | 'AFRICAS_TALKING') => {
-    setIsSwitchingProvider(true);
-    setStatusFeedback(null);
-    try {
-      const res = await apiClient.setSmsProvider(targetProvider);
-      if (res.success) {
-        setActiveProvider(targetProvider);
-        setStatusFeedback({ type: 'success', message: res.message });
-        fetchDiagnostics();
-        fetchQueue();
-      }
-    } catch (err: any) {
-      setStatusFeedback({ type: 'error', message: err.message || 'Failed to switch SMS provider.' });
-    } finally {
-      setIsSwitchingProvider(false);
-    }
+  const handleSwitchProvider = async () => {
+    // Pandora is exclusive; provider switching is disabled
   };
 
   // Initial load
@@ -206,7 +184,7 @@ export const SmsNotificationsView: React.FC = () => {
       if (res.success) {
         setStatusFeedback({
           type: 'success',
-          message: res.message || 'Test SMS dispatched successfully via Africa\'s Talking.',
+          message: res.message || `Test SMS dispatched successfully via ${activeProvider === 'PANDORA' ? 'Pandora Networks' : "Africa's Talking"}.`,
         });
         setIsTestSendModalOpen(false);
         fetchQueue();
@@ -671,36 +649,11 @@ export const SmsNotificationsView: React.FC = () => {
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-500">
-                <span>Dual-Provider Architecture • Durable Deduplication • Africa/Kampala UTC+3</span>
-                {hasPermission('admin.system_settings') && (
-                  <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
-                    <span className="text-[10px] font-semibold text-slate-600">Active Provider:</span>
-                    <button
-                      type="button"
-                      disabled={isSwitchingProvider}
-                      onClick={() => handleSwitchProvider('PANDORA')}
-                      className={`text-[10px] px-2 py-0.5 rounded font-bold transition ${
-                        activeProvider === 'PANDORA'
-                          ? 'bg-blue-700 text-white shadow-xs'
-                          : 'bg-white text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      Pandora (Primary)
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isSwitchingProvider}
-                      onClick={() => handleSwitchProvider('AFRICAS_TALKING')}
-                      className={`text-[10px] px-2 py-0.5 rounded font-bold transition ${
-                        activeProvider === 'AFRICAS_TALKING'
-                          ? 'bg-blue-700 text-white shadow-xs'
-                          : 'bg-white text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      Africa&apos;s Talking
-                    </button>
-                  </div>
-                )}
+                <span>Exclusive Provider: Pandora Networks • Durable Deduplication • Africa/Kampala UTC+3</span>
+                <div className="flex items-center gap-1.5 bg-blue-50 px-2.5 py-0.5 rounded-lg border border-blue-200">
+                  <span className="text-[10px] font-semibold text-blue-900">SMS Gateway:</span>
+                  <span className="text-[10px] font-bold text-blue-800">Pandora Networks (Active)</span>
+                </div>
               </div>
             </div>
           </div>
@@ -760,22 +713,22 @@ export const SmsNotificationsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Warning Banner: When Provider Submission is NOT configured */}
+        {/* Warning Banner: When Pandora Provider Submission is NOT configured */}
         {diagnostics && diagnostics.configurationStatus !== 'CONFIGURED' && (
           <div className="p-4 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 text-xs space-y-2">
             <div className="flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="font-bold text-amber-950">
-                  Africa&apos;s Talking submission is not configured on this deployment, so queued messages stay in the queue and are never marked as sent. Provider credentials are held only by the secure backend service, never by this interface.
+                  Pandora SMS submission is not configured on this deployment, so queued messages stay in the queue safely and are never marked as sent. Provider credentials are held only by the secure backend service, never by this interface.
                 </div>
                 <p className="text-amber-800 leading-relaxed text-[11px]">
                   <strong>Current Status:</strong> {diagnostics.configurationMessage}
                 </p>
                 <div className="pt-1 text-[11px] text-amber-800/90 flex flex-wrap gap-x-4 gap-y-1">
-                  <span>• <strong>Development environment:</strong> Operates under Africa&apos;s Talking Sandbox.</span>
-                  <span>• <strong>Production environment:</strong> Requires Africa&apos;s Talking Uganda SMS API credentials.</span>
-                  <span>• <strong>Required backend variables:</strong> <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">AT_USERNAME</code>, <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">AT_API_KEY</code>, <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">AT_SENDER_ID</code>.</span>
+                  <span>• <strong>Required backend variables:</strong> <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">PANDORA_SMS_PHONE_NUMBER</code> and <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">PANDORA_SMS_PASSWORD</code>.</span>
+                  <span>• <strong>Official API Endpoint:</strong> <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">https://sms.thepandoranetworks.com/api</code></span>
+                  <span>• <strong>Sender ID:</strong> <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">NYAMUYANJA</code> (Max 11 alphanumeric characters).</span>
                 </div>
               </div>
             </div>
@@ -808,24 +761,7 @@ export const SmsNotificationsView: React.FC = () => {
           </div>
         )}
 
-        {/* Notice Banner: Sandbox Mode Explanation */}
-        {diagnostics?.environment === 'SANDBOX' && diagnostics.configurationStatus === 'CONFIGURED' && (
-          <div className="p-3.5 rounded-xl bg-blue-50/90 border border-blue-200 text-blue-900 text-xs flex items-start gap-3">
-            <Radio className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <div className="font-bold text-blue-950 flex items-center gap-2">
-                <span>Africa&apos;s Talking Sandbox Mode Active — Web Simulator Delivery Only</span>
-                <span className="px-1.5 py-0.5 rounded bg-blue-200 text-blue-800 text-[10px] font-semibold">No Cellular Handset Delivery</span>
-              </div>
-              <p className="text-blue-800 text-[11px] leading-relaxed">
-                In Sandbox mode, SMS messages are accepted by Africa&apos;s Talking and routed to the <strong>Africa&apos;s Talking Web Simulator</strong> (or simulator app). <strong>They are never delivered to physical cellular phones or mobile towers.</strong>
-              </p>
-              <p className="text-blue-700 text-[10px]">
-                To receive live SMS on physical Ugandan mobile phones (+256), the SACCO administrator must configure production credentials (<code className="font-mono bg-blue-100 px-1 py-0.5 rounded">SMS_ENVIRONMENT=PRODUCTION</code>).
-              </p>
-            </div>
-          </div>
-        )}
+
 
         {/* Real-time Status Counters & Configuration Metadata */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
@@ -1744,7 +1680,7 @@ export const SmsNotificationsView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <FlaskConical className="w-5 h-5 text-blue-700" />
                 <h3 className="text-base font-bold text-slate-900">
-                  Africa&apos;s Talking Test Dispatch
+                  Pandora Networks Test Dispatch
                 </h3>
               </div>
               <button
@@ -1758,7 +1694,7 @@ export const SmsNotificationsView: React.FC = () => {
             <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-900 text-xs space-y-1">
               <span className="font-bold block">Safe Administrative Diagnostic Verification</span>
               <p className="text-[11px] leading-relaxed text-blue-800">
-                This transmits a single clearly-labelled test message to verify the live pipeline. Provider credentials remain held exclusively on the secure backend service.
+                This transmits a single clearly-labelled test message through Pandora Networks to verify the live pipeline. Provider credentials remain held exclusively on the secure backend service.
               </p>
             </div>
 
@@ -1783,7 +1719,7 @@ export const SmsNotificationsView: React.FC = () => {
               <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-[11px] text-slate-600 space-y-1">
                 <span className="font-semibold block text-slate-700">Message Content Preview:</span>
                 <p className="font-mono text-slate-800 bg-white p-2 rounded border border-slate-200">
-                  [ADMIN DIAGNOSTIC TEST] Nyamuyanja SACCO Turihamwe SMS delivery test via Africa&apos;s Talking {diagnostics?.environment || 'SANDBOX'} at [Timestamp].
+                  [ADMIN DIAGNOSTIC TEST] Nyamuyanja SACCO Turihamwe SMS delivery test via Pandora Networks at [Timestamp].
                 </p>
               </div>
 

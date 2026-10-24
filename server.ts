@@ -66,7 +66,7 @@ async function bootstrap() {
   await serverStore.initialize();
   await SeedService.seedInitialData();
 
-  // Start background Africa's Talking SMS Queue Worker
+  // Start background Pandora SMS Queue Worker
   smsQueueWorker.start();
 
   // Mount API endpoints
@@ -84,7 +84,7 @@ async function bootstrap() {
   app.use('/api/system', systemRouter);
 
   // Production Health Check & Monitoring (Requirement 7 & 15)
-  app.get('/api/health', (_req, res) => {
+  app.get(['/health', '/api/health'], (_req, res) => {
     const branches = serverStore.getBranches();
     const members = serverStore.getMembers();
     const users = serverStore.getUsers();
@@ -118,9 +118,8 @@ async function bootstrap() {
           maxUploadSizeMb: config.storage.maxUploadSizeMb,
         },
         sms: {
-          status: config.sms.enabled ? (config.sms.environment === 'PRODUCTION' ? 'LIVE_GATEWAY' : 'SANDBOX_MODE') : 'DISABLED',
-          provider: "Africa's Talking",
-          environment: config.sms.environment,
+          status: config.sms.enabled ? 'ONLINE' : 'DISABLED',
+          provider: 'PANDORA',
           senderId: config.sms.senderId,
           workerStatus: smsQueueWorker.getStatus(),
           configurationStatus: smsQueueWorker.getDiagnostics().configurationStatus,

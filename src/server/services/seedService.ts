@@ -45,25 +45,6 @@ export class SeedService {
         updatedAt: new Date().toISOString(),
       },
       {
-        id: 'usr-it-01',
-        username: 'itadm', // 5 chars
-        fullName: 'Patrick Mugisha (IT Officer)',
-        email: 'it.admin@nyamuyanjasacco.ug',
-        phone: '+256701234567',
-        passwordHash: defaultPasswordHash,
-        roleId: itRole.id,
-        roleName: itRole.name,
-        primaryBranchId: hqBranch.id,
-        allowedBranchIds: branches.map(b => b.id),
-        hasMultiBranchAccess: true,
-        isActive: true,
-        requiresPasswordReset: false,
-        directPermissions: [],
-        revokedPermissions: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      {
         id: 'usr-gm-01',
         username: 'gm001', // 5 chars
         fullName: 'Eunice Ahimbisibwe (General Manager)',
@@ -223,6 +204,24 @@ export class SeedService {
           reason: 'Updated existing account to default IT Officer administrator role and initial credentials',
         });
       }
+    }
+
+    // PART B: Active cleanup of confirmed dummy/test user 'itadm' to preserve authentic staff accounts only
+    const dummyItadm = serverStore.getUserByUsername('itadm');
+    if (dummyItadm) {
+      serverStore.deleteUser(dummyItadm.id);
+      AuditService.log({
+        userId: 'system',
+        username: 'system',
+        userFullName: 'System Initializer',
+        branchId: hqBranch.id,
+        branchName: hqBranch.name,
+        action: 'USER_DELETED',
+        recordType: 'USER',
+        recordId: dummyItadm.id,
+        previousValue: JSON.stringify({ id: dummyItadm.id, username: dummyItadm.username }),
+        reason: 'Cleaned up dummy/test account itadm to preserve authentic staff accounts only',
+      });
     }
 
     const isDeploymentReady = serverStore.getSystemSettings()['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true';

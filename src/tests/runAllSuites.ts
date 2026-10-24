@@ -215,7 +215,7 @@ async function main() {
 
   // Reset SEED_TEST_DATA and purge test fixtures so operational database remains clean for production
   delete process.env.SEED_TEST_DATA;
-  serverStore.clearAllOperationalData('usr-it-01', 'itadm');
+  serverStore.clearAllOperationalData('usr-it-ivan', 'ivan');
 
   console.log('================================================================');
   console.log(`GRAND TOTAL: ${grandTotal} TESTS | PASSED: ${grandPassed} | FAILED: ${grandFailed}`);

@@ -3,6 +3,7 @@ import { requireAuth, requirePermission, requireAnyPermission, AuthenticatedRequ
 import { serverStore } from '../storage/serverStore';
 import { AuditService } from '../services/auditService';
 import { BusinessRulesConfig, BackupConfig } from '../../types';
+import { PandoraSmsService } from '../services/pandoraSmsService';
 
 export const systemRouter = Router();
 
@@ -516,36 +517,69 @@ systemRouter.get(
           status: 'CONFIGURED',
         },
         {
-          key: 'AT_USERNAME',
-          category: 'Africa\'s Talking SMS Gateway',
-          description: 'Africa\'s Talking Uganda account username',
-          required: false,
+          key: 'SMS_PROVIDER',
+          category: 'Pandora Networks SMS Gateway',
+          description: 'Exclusive transactional SMS gateway provider (PANDORA)',
+          required: true,
           secret: false,
-          defaultValue: 'sandbox',
-          currentValue: process.env.AT_USERNAME || 'sandbox',
-          isSet: Boolean(process.env.AT_USERNAME),
+          defaultValue: 'PANDORA',
+          currentValue: 'PANDORA',
+          isSet: true,
           status: 'CONFIGURED',
         },
         {
-          key: 'AT_API_KEY',
-          category: 'Africa\'s Talking SMS Gateway',
-          description: 'Africa\'s Talking API authorization key for SMS delivery',
-          required: false,
+          key: 'PANDORA_SMS_API_URL',
+          category: 'Pandora Networks SMS Gateway',
+          description: 'Official Pandora SMS submission endpoint',
+          required: true,
+          secret: false,
+          defaultValue: 'https://www.sms.thepandoranetworks.com/API/send_sms/',
+          currentValue: process.env.PANDORA_SMS_API_URL || 'https://www.sms.thepandoranetworks.com/API/send_sms/',
+          isSet: Boolean(process.env.PANDORA_SMS_API_URL),
+          status: 'CONFIGURED',
+        },
+        {
+          key: 'PANDORA_SMS_BALANCE_URL',
+          category: 'Pandora Networks SMS Gateway',
+          description: 'Official Pandora SMS balance and credits inquiry endpoint',
+          required: true,
+          secret: false,
+          defaultValue: 'https://www.sms.thepandoranetworks.com/API/balance_inquiry.php',
+          currentValue: process.env.PANDORA_SMS_BALANCE_URL || 'https://www.sms.thepandoranetworks.com/API/balance_inquiry.php',
+          isSet: Boolean(process.env.PANDORA_SMS_BALANCE_URL),
+          status: 'CONFIGURED',
+        },
+        {
+          key: 'PANDORA_SMS_PHONE_NUMBER',
+          category: 'Pandora Networks SMS Gateway',
+          description: 'Registered Pandora account phone number (Uganda format 256XXXXXXXXX)',
+          required: true,
+          secret: false,
+          defaultValue: '256772123456',
+          currentValue: process.env.PANDORA_SMS_PHONE_NUMBER || '256772123456',
+          isSet: Boolean(process.env.PANDORA_SMS_PHONE_NUMBER),
+          status: 'CONFIGURED',
+        },
+        {
+          key: 'PANDORA_SMS_PASSWORD',
+          category: 'Pandora Networks SMS Gateway',
+          description: 'Confidential Pandora account password (strictly redacted from responses/logs)',
+          required: true,
           secret: true,
-          defaultValue: 'atsk_sandbox_development_key_placeholder',
-          currentValue: 'atsk_sandbox••••••••••••••••••••••••',
-          isSet: Boolean(process.env.AT_API_KEY),
+          defaultValue: 'pandora_account_secure_pass',
+          currentValue: '••••••••••••••••',
+          isSet: Boolean(process.env.PANDORA_SMS_PASSWORD),
           status: 'CONFIGURED',
         },
         {
-          key: 'AT_SENDER_ID',
-          category: 'Africa\'s Talking SMS Gateway',
-          description: 'UCC registered SMS sender alphanumeric header',
-          required: false,
+          key: 'PANDORA_SMS_SENDER_ID',
+          category: 'Pandora Networks SMS Gateway',
+          description: 'Approved UCC registered alphanumeric Sender ID (max 11 chars: NYAMUYANJA)',
+          required: true,
           secret: false,
-          defaultValue: 'TURIHAMWE',
-          currentValue: process.env.AT_SENDER_ID || 'TURIHAMWE',
-          isSet: Boolean(process.env.AT_SENDER_ID),
+          defaultValue: 'NYAMUYANJA',
+          currentValue: process.env.PANDORA_SMS_SENDER_ID || 'NYAMUYANJA',
+          isSet: Boolean(process.env.PANDORA_SMS_SENDER_ID),
           status: 'CONFIGURED',
         },
         {
@@ -638,6 +672,12 @@ systemRouter.post(
       if (!process.env.AT_USERNAME) process.env.AT_USERNAME = 'sandbox';
       if (!process.env.AT_API_KEY) process.env.AT_API_KEY = 'atsk_sandbox_development_key_placeholder';
       if (!process.env.AT_SENDER_ID) process.env.AT_SENDER_ID = 'TURIHAMWE';
+      if (!process.env.SMS_PROVIDER) process.env.SMS_PROVIDER = 'PANDORA';
+      if (!process.env.PANDORA_SMS_API_URL) process.env.PANDORA_SMS_API_URL = 'https://www.sms.thepandoranetworks.com/API/send_sms/';
+      if (!process.env.PANDORA_SMS_BALANCE_URL) process.env.PANDORA_SMS_BALANCE_URL = 'https://www.sms.thepandoranetworks.com/API/balance_inquiry.php';
+      if (!process.env.PANDORA_SMS_PHONE_NUMBER) process.env.PANDORA_SMS_PHONE_NUMBER = '256772123456';
+      if (!process.env.PANDORA_SMS_PASSWORD) process.env.PANDORA_SMS_PASSWORD = 'pandora_account_secure_pass';
+      if (!process.env.PANDORA_SMS_SENDER_ID) process.env.PANDORA_SMS_SENDER_ID = 'NYAMUYANJA';
       if (!process.env.BACKUP_ENABLED) process.env.BACKUP_ENABLED = 'true';
       if (!process.env.SYNC_ENABLED) process.env.SYNC_ENABLED = 'true';
       if (!process.env.GEMINI_API_KEY && process.env.GenerativeLanguageAPIKey) {
@@ -687,6 +727,61 @@ systemRouter.post(
     } catch (err: any) {
       console.error('Error clearing operational data:', err);
       res.status(500).json({ success: false, message: 'Failed to clear operational data: ' + err.message });
+    }
+  }
+);
+
+// ==========================================
+// 7. PANDORA SMS GATEWAY CONNECTION TEST (REQ 2.5)
+// ==========================================
+systemRouter.post(
+  '/pandora/test-connection',
+  requireAuth,
+  requireAnyPermission('admin.system_settings', 'audit.system_reports', 'sms.view_queue', 'audit.view_logs'),
+  async (_req: AuthenticatedRequest, res: Response) => {
+    try {
+      const result = await PandoraSmsService.testConnection();
+      res.json({
+        success: result.connected,
+        connected: result.connected,
+        data: result,
+        message: result.message,
+        error: result.error,
+      });
+    } catch (err: any) {
+      console.error('Pandora connection test error:', err);
+      res.status(500).json({
+        success: false,
+        connected: false,
+        message: 'Failed to test Pandora SMS connection',
+        error: PandoraSmsService.sanitizeError(err?.message),
+      });
+    }
+  }
+);
+
+systemRouter.get(
+  '/pandora/test-connection',
+  requireAuth,
+  requireAnyPermission('admin.system_settings', 'audit.system_reports', 'sms.view_queue', 'audit.view_logs'),
+  async (_req: AuthenticatedRequest, res: Response) => {
+    try {
+      const result = await PandoraSmsService.testConnection();
+      res.json({
+        success: result.connected,
+        connected: result.connected,
+        data: result,
+        message: result.message,
+        error: result.error,
+      });
+    } catch (err: any) {
+      console.error('Pandora connection test error:', err);
+      res.status(500).json({
+        success: false,
+        connected: false,
+        message: 'Failed to test Pandora SMS connection',
+        error: PandoraSmsService.sanitizeError(err?.message),
+      });
     }
   }
 );

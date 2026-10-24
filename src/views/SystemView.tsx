@@ -86,6 +86,53 @@ export const SystemView: React.FC = () => {
   const [healthMetrics, setHealthMetrics] = useState<SystemHealthMetrics | null>(null);
   const [loadingHealth, setLoadingHealth] = useState<boolean>(false);
 
+  // Pandora SMS connection test state
+  const [isTestingPandora, setIsTestingPandora] = useState<boolean>(false);
+  const [pandoraTestResult, setPandoraTestResult] = useState<{
+    tested: boolean;
+    connected: boolean;
+    balanceUGX?: string | null;
+    message: string;
+    error?: string;
+    checkedAt: string;
+  } | null>(null);
+
+  const handleTestPandoraConnection = async () => {
+    setIsTestingPandora(true);
+    try {
+      const res = await apiClient.testPandoraSmsConnection();
+      setPandoraTestResult({
+        tested: true,
+        connected: res.connected,
+        balanceUGX: res.data?.balanceUGX || null,
+        message: res.message || (res.connected ? 'Connected to Pandora Networks gateway successfully' : 'Connection failed'),
+        error: res.error || (res.connected ? undefined : res.message),
+        checkedAt: res.data?.checkedAt || new Date().toISOString(),
+      });
+      setNotification({
+        type: res.connected ? 'success' : 'error',
+        message: res.connected
+          ? `Pandora SMS Gateway connection verified. Balance: ${res.data?.balanceUGX || 'Active'}`
+          : `Pandora Gateway check failed: ${res.error || res.message}`,
+      });
+    } catch (err: any) {
+      setPandoraTestResult({
+        tested: true,
+        connected: false,
+        balanceUGX: null,
+        message: 'Could not connect to Pandora SMS Gateway',
+        error: err?.message || 'Network communication failure',
+        checkedAt: new Date().toISOString(),
+      });
+      setNotification({
+        type: 'error',
+        message: `Pandora test failed: ${err?.message || 'Communication error'}`,
+      });
+    } finally {
+      setIsTestingPandora(false);
+    }
+  };
+
   // Sync monitoring state
   const [syncData, setSyncData] = useState<{
     totalRecords: number;
@@ -683,6 +730,117 @@ export const SystemView: React.FC = () => {
                     SMS Sent: {healthMetrics.smsGateway.sentCount} • Failed: {healthMetrics.smsGateway.failedCount}
                   </div>
                 </div>
+              </div>
+
+              {/* Pandora SMS Gateway Connection Test (Req 2.5) */}
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700 shrink-0">
+                      <Radio className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-slate-900 text-sm">Pandora Networks SMS Gateway Connection Test</h3>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 uppercase tracking-wide">
+                          Official Provider
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Live balance inquiry verification via official endpoint (sms.thepandoranetworks.com). Zero SMS dispatched.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleTestPandoraConnection}
+                    disabled={isTestingPandora}
+                    className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold shadow-xs disabled:opacity-50 transition-colors cursor-pointer shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingPandora ? 'animate-spin' : ''}`} />
+                    {isTestingPandora ? 'Testing Gateway...' : 'Test Pandora Connection'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Target Endpoints</span>
+                    <div className="font-mono text-[11px] text-slate-800 truncate" title="https://www.sms.thepandoranetworks.com/API/balance_inquiry.php">
+                      /API/balance_inquiry.php
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Send SMS: /API/send_sms/</div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Authentication &amp; Sender</span>
+                    <div className="font-semibold text-slate-800">Sender ID: NYAMUYANJA (10 chars)</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Auth: Registered Phone + Password</div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Gateway Connectivity &amp; Balance</span>
+                    {pandoraTestResult ? (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              pandoraTestResult.connected ? 'bg-emerald-500' : 'bg-rose-500'
+                            }`}
+                          />
+                          <span
+                            className={`font-bold text-xs ${
+                              pandoraTestResult.connected ? 'text-emerald-700' : 'text-rose-700'
+                            }`}
+                          >
+                            {pandoraTestResult.connected ? 'CONNECTED' : 'DISCONNECTED'}
+                          </span>
+                          {pandoraTestResult.balanceUGX && (
+                            <span className="font-mono text-slate-700 text-[11px] font-semibold">
+                              • {pandoraTestResult.balanceUGX} UGX
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500 truncate" title={pandoraTestResult.message}>
+                          {pandoraTestResult.message}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-slate-500 text-[11px]">
+                        Click &apos;Test Pandora Connection&apos; to verify credentials safely without sending an SMS.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {pandoraTestResult && (
+                  <div
+                    className={`p-3 rounded-lg border text-xs flex items-start gap-2.5 ${
+                      pandoraTestResult.connected
+                        ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                        : 'bg-rose-50/70 border-rose-200 text-rose-900'
+                    }`}
+                  >
+                    {pandoraTestResult.connected ? (
+                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-xs">
+                        {pandoraTestResult.connected
+                          ? 'Pandora Gateway Credential Verification Succeeded'
+                          : 'Pandora Gateway Connectivity Notice'}
+                      </div>
+                      <p className="text-[11px] leading-relaxed">
+                        {pandoraTestResult.message}
+                        {pandoraTestResult.error && !pandoraTestResult.connected && ` — ${pandoraTestResult.error}`}
+                      </p>
+                      <div className="text-[10px] opacity-75 font-mono">
+                        Checked at: {new Date(pandoraTestResult.checkedAt).toLocaleTimeString()} (Africa/Kampala UTC+3)
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Table Breakdown & Recent Errors */}
@@ -1419,6 +1577,16 @@ export const SystemView: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleTestPandoraConnection}
+                disabled={isTestingPandora}
+                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer"
+                title="Verify Pandora SMS Gateway credentials via balance inquiry without sending SMS"
+              >
+                <Radio className={`w-3.5 h-3.5 text-blue-700 ${isTestingPandora ? 'animate-pulse' : ''}`} />
+                <span>{isTestingPandora ? 'Testing...' : 'Test Pandora SMS'}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setShowSecrets(!showSecrets)}

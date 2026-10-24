@@ -151,26 +151,102 @@ turihamweRouter.get('/plans/account/:accountNumber', requirePermission('turihamw
 });
 
 turihamweRouter.post('/plans', requirePermission('turihamwe.register_plan'), (req: AuthenticatedRequest, res: Response) => {
-  const { saccoAccountNumber, effectiveStartDate, currentExpiryDate, notes } = req.body;
+  const {
+    saccoAccountNumber,
+    effectiveStartDate,
+    currentExpiryDate,
+    registrationType,
+    contributionAmount,
+    registrationDate,
+    expiryDate,
+    notes,
+    updateExisting,
+  } = req.body;
 
-  if (!saccoAccountNumber || !effectiveStartDate || !currentExpiryDate) {
-    return res.status(400).json({ error: 'SACCO account number, start date, and expiry date are required.' });
+  if (!saccoAccountNumber) {
+    return res.status(400).json({ error: 'SACCO account number is required.' });
   }
 
-  // Confirm member exists
+  // 1. Resolve & validate registration date (preserves historical dates)
+  const resolvedRegDate = (registrationDate || effectiveStartDate || '').trim();
+  if (!resolvedRegDate) {
+    return res.status(400).json({ error: 'Registration date is required.' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(resolvedRegDate) || isNaN(Date.parse(resolvedRegDate))) {
+    return res.status(400).json({ error: 'Registration date must be a valid calendar date in YYYY-MM-DD format.' });
+  }
+
+  // 2. Resolve & validate expiry date
+  const resolvedExpiryDate = (expiryDate || currentExpiryDate || '').trim();
+  if (!resolvedExpiryDate) {
+    return res.status(400).json({ error: 'Expiry date is required.' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(resolvedExpiryDate) || isNaN(Date.parse(resolvedExpiryDate))) {
+    return res.status(400).json({ error: 'Expiry date must be a valid calendar date in YYYY-MM-DD format.' });
+  }
+
+  // 3. Validate registration type (Requirement A: Exactly two options)
+  const validRegTypes = ['Fresh Registration', 'Renewal'];
+  const resolvedRegType = (registrationType || 'Fresh Registration').trim();
+  if (!validRegTypes.includes(resolvedRegType)) {
+    return res.status(400).json({
+      error: `Invalid registration type '${resolvedRegType}'. Must be either 'Fresh Registration' or 'Renewal'.`,
+    });
+  }
+
+  // 4. Validate contribution amount (Requirement B: numeric, nonnegative, record-keeping only)
+  let numericContribution: number | undefined = undefined;
+  if (contributionAmount !== undefined && contributionAmount !== null && contributionAmount !== '') {
+    const parsed = Number(contributionAmount);
+    if (isNaN(parsed) || parsed < 0) {
+      return res.status(400).json({ error: 'Contribution amount must be a valid non-negative number in UGX.' });
+    }
+    numericContribution = parsed;
+  }
+
+  // 5. Confirm SACCO member exists
   const member = serverStore.getMemberByAccountNumber(saccoAccountNumber);
   if (!member) {
     return res.status(404).json({ error: `Member with SACCO account number ${saccoAccountNumber} does not exist.` });
   }
 
-  // Prevent duplicate active plan
+  const branch = req.workingBranch || serverStore.getBranchById(member.branchId) || serverStore.getBranches()[0];
+  const user = req.user!;
+
+  // 6. Support Existing Turihamwe Members (Requirement 2):
+  // If member already has a Turihamwe record, update it seamlessly rather than creating an unintentional duplicate.
   const existingPlan = serverStore.getPlanByAccountNumber(saccoAccountNumber);
-  if (existingPlan && existingPlan.status === 'ACTIVE') {
-    return res.status(409).json({ error: `Member ${saccoAccountNumber} already has an active Turihamwe plan (${existingPlan.id}).` });
+  if (existingPlan) {
+    const updatedPlan = serverStore.updatePlan(existingPlan.id, {
+      registrationType: resolvedRegType as 'Fresh Registration' | 'Renewal',
+      registrationDate: resolvedRegDate,
+      effectiveStartDate: resolvedRegDate,
+      expiryDate: resolvedExpiryDate,
+      currentExpiryDate: resolvedExpiryDate,
+      contributionAmount: numericContribution !== undefined ? numericContribution : existingPlan.contributionAmount,
+      isRecordKeepingOnly: true,
+      lastRenewalDate: resolvedRegType === 'Renewal' ? resolvedRegDate : existingPlan.lastRenewalDate,
+      status: 'ACTIVE',
+      notes: notes?.trim() || existingPlan.notes,
+    });
+
+    AuditService.log({
+      userId: user.id,
+      username: user.username,
+      userFullName: user.fullName,
+      branchId: branch.id,
+      branchName: branch.name,
+      action: 'PLAN_UPDATED',
+      recordType: 'TURIHAMWE_PLAN',
+      recordId: existingPlan.id,
+      newValue: `Updated Turihamwe record for ${member.saccoAccountNumber} (${member.fullName}): Type: ${resolvedRegType}, RegDate: ${resolvedRegDate}, Expiry: ${resolvedExpiryDate}, Contribution UGX: ${numericContribution ?? 'Unchanged'} (Record-keeping entry only)`,
+      reason: `Turihamwe member record-keeping entry updated by ${user.username}`,
+    });
+
+    return res.status(200).json(updatedPlan);
   }
 
-  const branch = req.workingBranch!;
-  const user = req.user!;
+  // 7. Fresh Registration Creation
   const planId = `PLN-${branch.code.substring(0, 3)}-${saccoAccountNumber.replace(/[^0-9]/g, '').slice(-6) || Math.floor(100000 + Math.random() * 900000)}`;
 
   const newPlan: TurihamwePlan = {
@@ -179,15 +255,20 @@ turihamweRouter.post('/plans', requirePermission('turihamwe.register_plan'), (re
     memberName: member.fullName,
     planCode: 'STANDARD',
     status: 'ACTIVE',
-    enrolmentDate: new Date().toISOString().split('T')[0],
-    effectiveStartDate,
-    currentExpiryDate,
+    enrolmentDate: resolvedRegDate,
+    effectiveStartDate: resolvedRegDate,
+    currentExpiryDate: resolvedExpiryDate,
+    registrationType: resolvedRegType as 'Fresh Registration' | 'Renewal',
+    registrationDate: resolvedRegDate,
+    expiryDate: resolvedExpiryDate,
+    contributionAmount: numericContribution,
+    isRecordKeepingOnly: true, // Crucial: Flagged as administrative record-keeping only, not a financial transaction
     registeredBranchId: branch.id,
     registeredBranchName: branch.name,
     registeredByUserId: user.id,
     registeredByUsername: user.username,
     beneficiaryCount: 0,
-    totalContributionsAmount: 0,
+    totalContributionsAmount: numericContribution || 0,
     notes: notes?.trim() || 'Enrolled in Turihamwe protection plan',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -204,10 +285,162 @@ turihamweRouter.post('/plans', requirePermission('turihamwe.register_plan'), (re
     action: 'PLAN_REGISTERED',
     recordType: 'TURIHAMWE_PLAN',
     recordId: newPlan.id,
-    newValue: `Registered Turihamwe plan ${newPlan.id} for ${member.saccoAccountNumber} (${member.fullName})`,
+    newValue: `Registered Turihamwe plan ${newPlan.id} for ${member.saccoAccountNumber} (${member.fullName}) with Type: ${resolvedRegType}, RegDate: ${resolvedRegDate}, Expiry: ${resolvedExpiryDate}, Contribution: UGX ${numericContribution ?? 0} (Record-keeping only)`,
+    reason: `Turihamwe plan registration created by ${user.username}`,
   });
 
   res.status(201).json(newPlan);
+});
+
+// Update an existing Turihamwe Plan record
+turihamweRouter.put('/plans/:id', requirePermission('turihamwe.register_plan'), (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const existingPlan = serverStore.getPlanById(id);
+  if (!existingPlan) {
+    return res.status(404).json({ error: `Turihamwe plan '${id}' not found.` });
+  }
+
+  const {
+    registrationType,
+    contributionAmount,
+    registrationDate,
+    expiryDate,
+    effectiveStartDate,
+    currentExpiryDate,
+    notes,
+    status,
+  } = req.body;
+
+  // Validate registration type if provided
+  if (registrationType !== undefined) {
+    const validRegTypes = ['Fresh Registration', 'Renewal'];
+    if (!validRegTypes.includes(registrationType)) {
+      return res.status(400).json({ error: "Invalid registration type. Must be either 'Fresh Registration' or 'Renewal'." });
+    }
+  }
+
+  // Validate contribution amount if provided
+  let numericContribution: number | undefined = undefined;
+  if (contributionAmount !== undefined && contributionAmount !== null && contributionAmount !== '') {
+    const parsed = Number(contributionAmount);
+    if (isNaN(parsed) || parsed < 0) {
+      return res.status(400).json({ error: 'Contribution amount must be a valid non-negative number in UGX.' });
+    }
+    numericContribution = parsed;
+  }
+
+  // Validate registration date if provided
+  const resolvedRegDate = registrationDate || effectiveStartDate;
+  if (resolvedRegDate && (!/^\d{4}-\d{2}-\d{2}$/.test(resolvedRegDate) || isNaN(Date.parse(resolvedRegDate)))) {
+    return res.status(400).json({ error: 'Registration date must be a valid calendar date in YYYY-MM-DD format.' });
+  }
+
+  // Validate expiry date if provided
+  const resolvedExpiryDate = expiryDate || currentExpiryDate;
+  if (resolvedExpiryDate && (!/^\d{4}-\d{2}-\d{2}$/.test(resolvedExpiryDate) || isNaN(Date.parse(resolvedExpiryDate)))) {
+    return res.status(400).json({ error: 'Expiry date must be a valid calendar date in YYYY-MM-DD format.' });
+  }
+
+  const user = req.user!;
+  const branch = req.workingBranch || serverStore.getBranches()[0];
+
+  const updatedPlan = serverStore.updatePlan(id, {
+    ...(registrationType ? { registrationType } : {}),
+    ...(numericContribution !== undefined ? { contributionAmount: numericContribution, isRecordKeepingOnly: true } : {}),
+    ...(resolvedRegDate ? { registrationDate: resolvedRegDate, effectiveStartDate: resolvedRegDate } : {}),
+    ...(resolvedExpiryDate ? { expiryDate: resolvedExpiryDate, currentExpiryDate: resolvedExpiryDate } : {}),
+    ...(registrationType === 'Renewal' && resolvedRegDate ? { lastRenewalDate: resolvedRegDate } : {}),
+    ...(status ? { status } : {}),
+    ...(notes !== undefined ? { notes: notes.trim() } : {}),
+  });
+
+  AuditService.log({
+    userId: user.id,
+    username: user.username,
+    userFullName: user.fullName,
+    branchId: branch.id,
+    branchName: branch.name,
+    action: 'PLAN_UPDATED',
+    recordType: 'TURIHAMWE_PLAN',
+    recordId: id,
+    newValue: `Updated Turihamwe plan ${id} record-keeping fields`,
+    reason: `Turihamwe plan record updated by ${user.username}`,
+  });
+
+  res.json(updatedPlan);
+});
+
+// Update plan by member's SACCO account number
+turihamweRouter.put('/plans/account/:accountNumber', requirePermission('turihamwe.register_plan'), (req: AuthenticatedRequest, res: Response) => {
+  const { accountNumber } = req.params;
+  const existingPlan = serverStore.getPlanByAccountNumber(accountNumber);
+  if (!existingPlan) {
+    return res.status(404).json({ error: `No Turihamwe plan found for SACCO member '${accountNumber}'.` });
+  }
+
+  // Forward to PUT /plans/:id handler logic
+  req.params.id = existingPlan.id;
+  const user = req.user!;
+  const branch = req.workingBranch || serverStore.getBranches()[0];
+
+  const {
+    registrationType,
+    contributionAmount,
+    registrationDate,
+    expiryDate,
+    effectiveStartDate,
+    currentExpiryDate,
+    notes,
+    status,
+  } = req.body;
+
+  if (registrationType !== undefined && !['Fresh Registration', 'Renewal'].includes(registrationType)) {
+    return res.status(400).json({ error: "Invalid registration type. Must be either 'Fresh Registration' or 'Renewal'." });
+  }
+
+  let numericContribution: number | undefined = undefined;
+  if (contributionAmount !== undefined && contributionAmount !== null && contributionAmount !== '') {
+    const parsed = Number(contributionAmount);
+    if (isNaN(parsed) || parsed < 0) {
+      return res.status(400).json({ error: 'Contribution amount must be a valid non-negative number in UGX.' });
+    }
+    numericContribution = parsed;
+  }
+
+  const resolvedRegDate = registrationDate || effectiveStartDate;
+  if (resolvedRegDate && (!/^\d{4}-\d{2}-\d{2}$/.test(resolvedRegDate) || isNaN(Date.parse(resolvedRegDate)))) {
+    return res.status(400).json({ error: 'Registration date must be a valid calendar date in YYYY-MM-DD format.' });
+  }
+
+  const resolvedExpiryDate = expiryDate || currentExpiryDate;
+  if (resolvedExpiryDate && (!/^\d{4}-\d{2}-\d{2}$/.test(resolvedExpiryDate) || isNaN(Date.parse(resolvedExpiryDate)))) {
+    return res.status(400).json({ error: 'Expiry date must be a valid calendar date in YYYY-MM-DD format.' });
+  }
+
+  const updatedPlan = serverStore.updatePlan(existingPlan.id, {
+    ...(registrationType ? { registrationType } : {}),
+    ...(numericContribution !== undefined ? { contributionAmount: numericContribution, isRecordKeepingOnly: true } : {}),
+    ...(resolvedRegDate ? { registrationDate: resolvedRegDate, effectiveStartDate: resolvedRegDate } : {}),
+    ...(resolvedExpiryDate ? { expiryDate: resolvedExpiryDate, currentExpiryDate: resolvedExpiryDate } : {}),
+    ...(registrationType === 'Renewal' && resolvedRegDate ? { lastRenewalDate: resolvedRegDate } : {}),
+    ...(status ? { status } : {}),
+    ...(notes !== undefined ? { notes: notes.trim() } : {}),
+  });
+
+  AuditService.log({
+    userId: user.id,
+    username: user.username,
+    userFullName: user.fullName,
+    branchId: branch.id,
+    branchName: branch.name,
+    action: 'PLAN_UPDATED',
+    recordType: 'TURIHAMWE_PLAN',
+    recordId: existingPlan.id,
+    newValue: `Updated Turihamwe plan ${existingPlan.id} via SACCO account ${accountNumber}`,
+    reason: `Record-keeping update for member ${accountNumber}`,
+  });
+
+  res.json(updatedPlan);
 });
 
 // ==========================================

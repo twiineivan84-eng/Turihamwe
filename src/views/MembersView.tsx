@@ -7,6 +7,7 @@ import { INITIAL_BRANCHES } from '../constants/branches';
 import { localDb } from '../db/local/sqliteEngine';
 import { LocalRepository } from '../db/local/localRepository';
 import { ContributionReceiptModal } from '../components/turihamwe/ContributionReceiptModal';
+import { RegisterPlanModal } from '../components/turihamwe/RegisterPlanModal';
 import { notifyRecordChanged, subscribeToRecordChanges } from '../utils/systemEvents';
 import {
   Users,
@@ -71,6 +72,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
   const [showNormalEditModal, setShowNormalEditModal] = useState<boolean>(false);
   const [showCorrectionModal, setShowCorrectionModal] = useState<boolean>(false);
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+  const [showTurihamweModal, setShowTurihamweModal] = useState<boolean>(false);
   const [memberToDelete, setMemberToDelete] = useState<SaccoMember | null>(null);
   const [deleteReason, setDeleteReason] = useState<string>('');
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
@@ -1704,15 +1706,24 @@ export const MembersView: React.FC<MembersViewProps> = ({
                       <HeartHandshake className="w-3.5 h-3.5 text-blue-700" />
                       Turihamwe Protection Plan Overview
                     </h3>
-                    {memberPlan && (
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                        memberPlan.status === 'ACTIVE'
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : 'bg-amber-100 text-amber-800 border border-amber-200'
-                      }`}>
-                        Plan Status: {memberPlan.status}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {memberPlan && (
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                          memberPlan.status === 'ACTIVE'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-amber-100 text-amber-800 border border-amber-200'
+                        }`}>
+                          Plan Status: {memberPlan.status}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowTurihamweModal(true)}
+                        className="px-2.5 py-1 bg-blue-700 hover:bg-blue-800 text-white rounded text-[11px] font-bold transition shadow-xs"
+                      >
+                        {memberPlan ? 'Update Turihamwe Record' : 'Record Turihamwe Enrolment'}
+                      </button>
+                    </div>
                   </div>
 
                   {memberPlan ? (
@@ -1725,27 +1736,33 @@ export const MembersView: React.FC<MembersViewProps> = ({
                           </div>
                         </div>
                         <div>
-                          <span className="text-slate-500 font-medium">Scheme Type:</span>
-                          <div className="font-semibold text-slate-900 mt-0.5">
-                            {memberPlan.planCode || 'Standard'} Funeral & Protection
+                          <span className="text-slate-500 font-medium">Registration Type:</span>
+                          <div className="mt-0.5">
+                            <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                              memberPlan.registrationType === 'Renewal'
+                                ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                : 'bg-blue-100 text-blue-800 border border-blue-200'
+                            }`}>
+                              {memberPlan.registrationType || 'Fresh Registration'}
+                            </span>
                           </div>
                         </div>
                         <div>
-                          <span className="text-slate-500 font-medium">Enrolment Date:</span>
-                          <div className="font-mono font-semibold text-slate-900 mt-0.5">
-                            {memberPlan.enrolmentDate || selectedMember.registrationDate}
+                          <span className="text-slate-500 font-medium">Recorded Contribution:</span>
+                          <div className="font-mono font-bold text-slate-900 mt-0.5">
+                            {memberPlan.contributionAmount != null ? `UGX ${memberPlan.contributionAmount.toLocaleString()}` : '—'}
                           </div>
                         </div>
                         <div>
-                          <span className="text-slate-500 font-medium">Effective Start Date:</span>
+                          <span className="text-slate-500 font-medium">Registration Date:</span>
                           <div className="font-mono font-semibold text-slate-900 mt-0.5">
-                            {memberPlan.effectiveStartDate || '—'}
+                            {memberPlan.registrationDate || memberPlan.enrolmentDate || selectedMember.registrationDate}
                           </div>
                         </div>
                         <div>
                           <span className="text-slate-500 font-medium">Current Expiry Date:</span>
                           <div className="font-mono font-bold text-emerald-800 mt-0.5">
-                            {memberPlan.currentExpiryDate || '—'}
+                            {memberPlan.expiryDate || memberPlan.currentExpiryDate || '—'}
                           </div>
                         </div>
                         <div>
@@ -1761,7 +1778,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
                           </div>
                         </div>
                         <div>
-                          <span className="text-slate-500 font-medium">Total Contributions:</span>
+                          <span className="text-slate-500 font-medium">Total Ledger Contributions:</span>
                           <div className="font-bold text-blue-900 mt-0.5">
                             UGX {(memberPlan.totalContributionsAmount || memberContributions.reduce((s, c) => s + (c.amount || 0), 0)).toLocaleString()}
                           </div>
@@ -1787,9 +1804,13 @@ export const MembersView: React.FC<MembersViewProps> = ({
                       <p className="text-[11px] text-slate-500 mt-1 max-w-md mx-auto">
                         SACCO Member {selectedMember.saccoAccountNumber} ({selectedMember.fullName}) is currently unregistered for the Turihamwe Insurance scheme.
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-2">
-                        To register this member into the scheme, navigate to the Turihamwe module and select "Enroll Member in Protection Plan".
-                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowTurihamweModal(true)}
+                        className="mt-3 px-3.5 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition shadow-xs"
+                      >
+                        Record Turihamwe Registration & Contribution
+                      </button>
                     </div>
                   )}
                 </div>
@@ -3177,6 +3198,20 @@ export const MembersView: React.FC<MembersViewProps> = ({
         }}
         contribution={selectedContributionForReceipt}
       />
+
+      {/* Turihamwe Registration & Contribution Modal */}
+      {selectedMember && (
+        <RegisterPlanModal
+          isOpen={showTurihamweModal}
+          preselectedMember={selectedMember}
+          existingPlan={memberPlan}
+          onClose={() => setShowTurihamweModal(false)}
+          onSuccess={savedPlan => {
+            setMemberPlan(savedPlan);
+            setShowTurihamweModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };

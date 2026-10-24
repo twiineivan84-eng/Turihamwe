@@ -604,24 +604,24 @@ export async function runOperationalGoLiveAudit(): Promise<{
   // CHECKLIST E: SMS
   // =========================================================================
 
-  // E1: Confirm Africa's Talking remains in SANDBOX mode
+  // E1: Confirm Pandora SMS is exclusive provider and Africa's Talking is completely absent
   try {
-    const healthRes = await fetch(`${BASE_URL}/health`);
+    const healthRes = await fetch(`${BASE_URL}/api/health`);
     const healthData = (await healthRes.json()) as any;
     const sms = healthData.components?.sms;
-    const isSandbox = sms?.environment === 'SANDBOX';
-    const isAfricasTalking = sms?.provider === "Africa's Talking";
-    const ok = isSandbox && isAfricasTalking;
+    const isPandora = sms?.provider === 'PANDORA';
+    const notAfricasTalking = sms?.provider !== "Africa's Talking";
+    const ok = isPandora && notAfricasTalking;
 
     record(
       'E',
-      "Africa's Talking configured strictly in SANDBOX mode",
+      "Pandora SMS configured as exclusive transactional provider and Africa's Talking removed",
       ok,
-      ok ? `Confirmed: SMS gateway provider=${sms.provider}, environment=${sms.environment}.` : `Environment is ${sms?.environment}`,
-      { provider: sms?.provider, environment: sms?.environment, status: sms?.status }
+      ok ? `Confirmed: SMS gateway provider=${sms.provider}, status=${sms.status}, worker=${sms.workerStatus}.` : `SMS provider is ${sms?.provider}`,
+      { provider: sms?.provider, status: sms?.status, workerStatus: sms?.workerStatus }
     );
   } catch (err: any) {
-    record('E', "Africa's Talking configured strictly in SANDBOX mode", false, err.message);
+    record('E', "Pandora SMS configured as exclusive transactional provider and Africa's Talking removed", false, err.message);
   }
 
   // E2: Confirm credentials are read server-side and never exposed through frontend bundles or API responses

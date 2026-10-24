@@ -4,7 +4,6 @@ import { serverStore } from '../storage/serverStore';
 import { config } from '../config';
 import { AuditService } from '../services/auditService';
 import { SmsService } from '../services/smsService';
-import { AfricasTalkingAdapter } from '../services/africasTalkingAdapter';
 import { PandoraAdapter } from '../services/pandoraAdapter';
 import { smsQueueWorker } from '../services/smsQueueWorker';
 import { SmsTemplate, SmsMessage } from '../../types';
@@ -314,12 +313,15 @@ smsRouter.post('/provider', requirePermission('admin.system_settings'), (req: Au
   const workingBranch = req.workingBranch;
   const { provider } = req.body;
 
-  if (!['PANDORA', 'AFRICAS_TALKING'].includes(provider)) {
-    res.status(400).json({ success: false, error: "Invalid provider. Must be 'PANDORA' or 'AFRICAS_TALKING'." });
+  if (provider !== 'PANDORA') {
+    res.status(400).json({
+      success: false,
+      error: "Invalid provider. Pandora SMS is the exclusive SMS provider for Turihamwe Management System.",
+    });
     return;
   }
 
-  serverStore.updateSystemSettings({ 'sms.provider': provider });
+  serverStore.updateSystemSettings({ 'sms.provider': 'PANDORA' });
 
   AuditService.log({
     userId: user.id,
@@ -345,15 +347,11 @@ smsRouter.post('/provider', requirePermission('admin.system_settings'), (req: Au
 // 11. TEST PROVIDER CONNECTION (SAFE: NO SMS SENT)
 // ==========================================
 smsRouter.post('/test-connection', requirePermission('sms.view_queue'), async (req: AuthenticatedRequest, res: Response) => {
-  const targetProvider = (req.body?.provider || serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA') as 'PANDORA' | 'AFRICAS_TALKING';
-
-  const result = targetProvider === 'PANDORA'
-    ? await PandoraAdapter.testConnection()
-    : await AfricasTalkingAdapter.testConnection();
+  const result = await PandoraAdapter.testConnection();
 
   res.json({
     success: result.connected,
-    provider: targetProvider,
+    provider: 'PANDORA',
     data: result,
     message: result.message,
   });
@@ -378,23 +376,19 @@ smsRouter.post('/test-send', requirePermission('sms.send'), async (req: Authenti
   }
 
   const formattedPhone = SmsService.formatUgandanPhone(recipientPhone);
-  const activeProvider = (req.body?.provider || serverStore.getSystemSetting('sms.provider') || config.sms.provider || 'PANDORA') as 'PANDORA' | 'AFRICAS_TALKING';
-
-  const validation = activeProvider === 'PANDORA'
-    ? PandoraAdapter.validateConfiguration()
-    : AfricasTalkingAdapter.validateConfiguration();
+  const validation = PandoraAdapter.validateConfiguration();
 
   if (!validation.canSubmit) {
     res.status(400).json({
       success: false,
       error: validation.message,
       configurationStatus: validation.status,
-      provider: activeProvider,
+      provider: 'PANDORA',
     });
     return;
   }
 
-  const testMessageText = `[ADMIN DIAGNOSTIC TEST] Nyamuyanja SACCO Turihamwe SMS delivery test via ${activeProvider === 'PANDORA' ? 'Pandora Networks' : "Africa's Talking"} at ${new Date().toLocaleTimeString()}.`;
+  const testMessageText = `[ADMIN DIAGNOSTIC TEST] Nyamuyanja SACCO Turihamwe SMS delivery test via Pandora Networks at ${new Date().toLocaleTimeString()}.`;
 
   const queueResult = SmsService.queueMessage({
     recipientPhone: formattedPhone,
@@ -446,17 +440,11 @@ smsRouter.post('/worker/stop', requirePermission('admin.system_settings'), (_req
 });
 
 // ==========================================
-// 14. AFRICA'S TALKING DELIVERY REPORT (DLR) CALLBACK
+// 14. PANDORA / TELCO DELIVERY REPORT (DLR) CALLBACK
 // ==========================================
 /**
- * Africa's Talking Delivery Reports (DLR) Webhook.
- * Official specification:
- * POST parameters (application/x-www-form-urlencoded or JSON):
- * - id: unique message ID returned during submission (e.g. ATXid_...)
- * - status: 'Success' | 'Sent' | 'Submitted' | 'Buffered' | 'Rejected' | 'Failed' | 'AbsentSubscriber' | 'Expired'
- * - phoneNumber: recipient's phone number
- * - networkCode: telco network operator code (e.g. 64101)
- * - failureReason: optional failure explanation
+ * Telecommunications Delivery Reports (DLR) Webhook.
+ * Handles delivery receipts from telecom network operator.
  */
 const handleDeliveryReport = (req: any, res: Response) => {
   // Validate optional secret token if configured on backend

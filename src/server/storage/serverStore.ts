@@ -1165,11 +1165,19 @@ class ServerStore {
   }
 
   public addPlan(plan: TurihamwePlan): void {
-    this.state.plans.unshift(plan);
+    // Preserve manually entered registration and expiry dates
+    const effectivePlan: TurihamwePlan = {
+      ...plan,
+      registrationDate: plan.registrationDate || plan.enrolmentDate || plan.effectiveStartDate,
+      expiryDate: plan.expiryDate || plan.currentExpiryDate,
+      currentExpiryDate: plan.expiryDate || plan.currentExpiryDate,
+      effectiveStartDate: plan.registrationDate || plan.effectiveStartDate || plan.enrolmentDate,
+    };
+    this.state.plans.unshift(effectivePlan);
     // Update member's status as well
-    const member = this.getMemberByAccountNumber(plan.saccoAccountNumber);
+    const member = this.getMemberByAccountNumber(effectivePlan.saccoAccountNumber);
     if (member) {
-      member.turihamweStatus = plan.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED';
+      member.turihamweStatus = effectivePlan.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED';
     }
     this.save();
   }
@@ -1177,9 +1185,15 @@ class ServerStore {
   public updatePlan(id: string, updates: Partial<TurihamwePlan>): TurihamwePlan | undefined {
     const idx = this.state.plans.findIndex(p => p.id === id);
     if (idx === -1) return undefined;
+
+    const mergedExpiry = updates.expiryDate || updates.currentExpiryDate;
+    const mergedRegDate = updates.registrationDate || updates.effectiveStartDate;
+
     this.state.plans[idx] = {
       ...this.state.plans[idx],
       ...updates,
+      ...(mergedExpiry ? { expiryDate: mergedExpiry, currentExpiryDate: mergedExpiry } : {}),
+      ...(mergedRegDate ? { registrationDate: mergedRegDate, effectiveStartDate: mergedRegDate } : {}),
       updatedAt: new Date().toISOString(),
     };
     if (updates.status) {
@@ -2163,6 +2177,14 @@ class ServerStore {
     return this.state.systemSettings;
   }
 
+  public setSystemSetting(key: string, value: string): void {
+    if (!this.state.systemSettings) {
+      this.state.systemSettings = {};
+    }
+    this.state.systemSettings[key] = value;
+    this.save();
+  }
+
   // ==========================================
   // PHASE 7: BACKUP & RESTORE FOUNDATION
   // ==========================================
@@ -2597,7 +2619,7 @@ class ServerStore {
       },
       smsGateway: {
         status: failedSmsCount > 5 ? 'DEGRADED' : 'OPERATIONAL',
-        provider: 'AFRICAS_TALKING',
+        provider: 'PANDORA',
         pendingCount: pendingSmsCount,
         sentCount: sentSmsCount,
         failedCount: failedSmsCount,

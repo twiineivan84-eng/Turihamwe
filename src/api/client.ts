@@ -577,6 +577,25 @@ class ApiClient {
     });
   }
 
+  public async testPandoraSmsConnection(): Promise<{
+    success: boolean;
+    connected: boolean;
+    data?: {
+      connected: boolean;
+      provider: 'PANDORA';
+      balanceUGX?: string | null;
+      message: string;
+      error?: string;
+      checkedAt: string;
+    };
+    message: string;
+    error?: string;
+  }> {
+    return this.request('/system/pandora/test-connection', {
+      method: 'POST',
+    });
+  }
+
   public async clearAllOperationalData(): Promise<{
     success: boolean;
     data: {
@@ -974,15 +993,15 @@ class ApiClient {
 
   public async getSmsProvider(): Promise<{
     success: boolean;
-    provider: 'PANDORA' | 'AFRICAS_TALKING';
+    provider: 'PANDORA';
     activeSenderId: string;
   }> {
     return this.request('/sms/provider');
   }
 
-  public async setSmsProvider(provider: 'PANDORA' | 'AFRICAS_TALKING'): Promise<{
+  public async setSmsProvider(provider: 'PANDORA'): Promise<{
     success: boolean;
-    provider: 'PANDORA' | 'AFRICAS_TALKING';
+    provider: 'PANDORA';
     message: string;
   }> {
     return this.request('/sms/provider', {
@@ -991,7 +1010,7 @@ class ApiClient {
     });
   }
 
-  public async testSmsConnection(provider?: 'PANDORA' | 'AFRICAS_TALKING'): Promise<{
+  public async testSmsConnection(provider?: 'PANDORA'): Promise<{
     success: boolean;
     data: {
       connected: boolean;

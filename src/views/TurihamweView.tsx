@@ -103,6 +103,7 @@ export const TurihamweView: React.FC = () => {
   const [selectedPlanForReactivation, setSelectedPlanForReactivation] = useState<TurihamwePlan | null>(null);
 
   const [isRegisterPlanOpen, setIsRegisterPlanOpen] = useState(false);
+  const [selectedPlanForEdit, setSelectedPlanForEdit] = useState<TurihamwePlan | null>(null);
   const [isBusinessRulesOpen, setIsBusinessRulesOpen] = useState(false);
 
   // Load Data
@@ -1041,11 +1042,14 @@ export const TurihamweView: React.FC = () => {
             </div>
             {canRegisterPlan && (
               <button
-                onClick={() => setIsRegisterPlanOpen(true)}
+                onClick={() => {
+                  setSelectedPlanForEdit(null);
+                  setIsRegisterPlanOpen(true);
+                }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold transition shadow-xs"
               >
                 <PlusCircle className="w-3.5 h-3.5" />
-                Register New Plan
+                Record Turihamwe Registration & Contribution
               </button>
             )}
           </div>
@@ -1054,24 +1058,36 @@ export const TurihamweView: React.FC = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-600 font-semibold border-b uppercase">
                 <tr>
-                  <th className="px-6 py-3">Plan ID</th>
-                  <th className="px-6 py-3">SACCO A/C</th>
-                  <th className="px-6 py-3">Member Name</th>
-                  <th className="px-6 py-3">Branch</th>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3">Effective Date</th>
-                  <th className="px-6 py-3">Current Expiry</th>
-                  <th className="px-6 py-3 text-right">Actions</th>
+                  <th className="px-5 py-3">Plan ID</th>
+                  <th className="px-5 py-3">SACCO A/C</th>
+                  <th className="px-5 py-3">Member Name</th>
+                  <th className="px-5 py-3">Type</th>
+                  <th className="px-5 py-3">Contribution (UGX)</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3">Reg Date</th>
+                  <th className="px-5 py-3">Expiry Date</th>
+                  <th className="px-5 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {filteredPlans.map(p => (
                   <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="px-6 py-3 font-mono font-bold text-blue-900">{p.id}</td>
-                    <td className="px-6 py-3 font-mono font-semibold">{p.saccoAccountNumber}</td>
-                    <td className="px-6 py-3 font-bold text-slate-900">{p.memberName}</td>
-                    <td className="px-6 py-3">{p.registeredBranchName || 'SACCO Branch'}</td>
-                    <td className="px-6 py-3">
+                    <td className="px-5 py-3 font-mono font-bold text-blue-900">{p.id}</td>
+                    <td className="px-5 py-3 font-mono font-semibold">{p.saccoAccountNumber}</td>
+                    <td className="px-5 py-3 font-bold text-slate-900">{p.memberName}</td>
+                    <td className="px-5 py-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        p.registrationType === 'Renewal'
+                          ? 'bg-purple-50 text-purple-800 border border-purple-200'
+                          : 'bg-blue-50 text-blue-800 border border-blue-200'
+                      }`}>
+                        {p.registrationType || 'Fresh Registration'}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 font-mono font-semibold text-slate-900">
+                      {p.contributionAmount != null ? `UGX ${p.contributionAmount.toLocaleString()}` : '—'}
+                    </td>
+                    <td className="px-5 py-3">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                         p.status === 'ACTIVE'
                           ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
@@ -1082,10 +1098,22 @@ export const TurihamweView: React.FC = () => {
                         {p.status}
                       </span>
                     </td>
-                    <td className="px-6 py-3 font-mono">{p.effectiveStartDate}</td>
-                    <td className="px-6 py-3 font-mono font-semibold">{p.currentExpiryDate}</td>
-                    <td className="px-6 py-3 text-right">
+                    <td className="px-5 py-3 font-mono">{p.registrationDate || p.effectiveStartDate}</td>
+                    <td className="px-5 py-3 font-mono font-semibold text-emerald-800">{p.expiryDate || p.currentExpiryDate}</td>
+                    <td className="px-5 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        {canRegisterPlan && (
+                          <button
+                            onClick={() => {
+                              setSelectedPlanForEdit(p);
+                              setIsRegisterPlanOpen(true);
+                            }}
+                            className="text-blue-700 hover:underline font-bold text-[11px]"
+                            title="Edit / Update Turihamwe registration record"
+                          >
+                            Edit Record
+                          </button>
+                        )}
                         {canRecordContribution && (
                           <button
                             onClick={() => {
@@ -1103,7 +1131,7 @@ export const TurihamweView: React.FC = () => {
                               setSelectedPlanForRenewal(p);
                               setIsRecordRenewalOpen(true);
                             }}
-                            className="text-blue-700 hover:underline font-bold text-[11px]"
+                            className="text-purple-700 hover:underline font-bold text-[11px]"
                           >
                             Renew
                           </button>
@@ -1288,12 +1316,17 @@ export const TurihamweView: React.FC = () => {
         }}
       />
 
-      {/* 6. Register Plan Modal */}
+      {/* 6. Register / Record Turihamwe Plan Modal */}
       <RegisterPlanModal
         isOpen={isRegisterPlanOpen}
-        onClose={() => setIsRegisterPlanOpen(false)}
-        onSuccess={newPlan => {
-          notifyRecordChanged('PLAN', 'CREATED', (newPlan as any)?.id || 'plan', newPlan);
+        existingPlan={selectedPlanForEdit}
+        onClose={() => {
+          setIsRegisterPlanOpen(false);
+          setSelectedPlanForEdit(null);
+        }}
+        onSuccess={savedPlan => {
+          notifyRecordChanged('PLAN', selectedPlanForEdit ? 'UPDATED' : 'CREATED', (savedPlan as any)?.id || 'plan', savedPlan);
+          setSelectedPlanForEdit(null);
           loadTurihamweData();
         }}
       />

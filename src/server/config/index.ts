@@ -43,6 +43,7 @@ export interface DatabaseConfig {
 export interface PandoraConfig {
   apiUrl: string;
   balanceUrl: string;
+  phoneNumber: string;
   username: string;
   password?: string;
   senderId: string;
@@ -50,10 +51,7 @@ export interface PandoraConfig {
 
 export interface SmsConfig {
   enabled: boolean;
-  provider: 'AFRICAS_TALKING' | 'PANDORA';
-  environment: 'SANDBOX' | 'PRODUCTION';
-  username: string;
-  apiKey?: string;
+  provider: 'PANDORA';
   senderId: string;
   pandora: PandoraConfig;
 }
@@ -128,28 +126,26 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
   const dataFile = path.resolve(dataDir, env.DATA_FILE_NAME || 'turihamwe_central_db.json');
   const sqlitePath = env.SQLITE_DATABASE_PATH || path.resolve(dataDir, 'turihamwe-local.sqlite');
 
-  // SMS Gateway Configuration (Active: Pandora Networks | Fallback: Africa's Talking)
+  // SMS Gateway Configuration (Exclusive Provider: Pandora Networks)
   const smsEnabled = env.SMS_ENABLED !== 'false';
-  const smsProvider = (env.SMS_PROVIDER === 'AFRICAS_TALKING' ? 'AFRICAS_TALKING' : 'PANDORA') as 'AFRICAS_TALKING' | 'PANDORA';
-  const smsEnv = (env.SMS_ENVIRONMENT === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX') as 'SANDBOX' | 'PRODUCTION';
-  const atUsername = env.AT_USERNAME || 'sandbox';
-  const atApiKey = env.AT_API_KEY || env.AFRICAS_TALKING_API_KEY;
-  const atSenderId = env.AT_SENDER_ID || 'TURIHAMWE';
+  const smsProvider: 'PANDORA' = 'PANDORA';
 
-  // Pandora Networks SMS (Primary Intended Provider for Nyamuyanja SACCO Ltd, Uganda)
+  // Pandora Networks SMS (Exclusive Provider for Nyamuyanja SACCO Ltd, Uganda)
+  // Official API: https://sms.thepandoranetworks.com/api
   const pandoraApiUrl = env.PANDORA_SMS_API_URL || 'https://www.sms.thepandoranetworks.com/API/send_sms/';
   const pandoraBalanceUrl = env.PANDORA_SMS_BALANCE_URL || 'https://www.sms.thepandoranetworks.com/API/balance_inquiry.php';
-  const pandoraUsername = env.PANDORA_SMS_USERNAME || '';
+  const pandoraPhoneNumber = (env.PANDORA_SMS_PHONE_NUMBER || env.PANDORA_SMS_USERNAME || '').trim();
+  const pandoraUsername = pandoraPhoneNumber;
   const pandoraPassword = env.PANDORA_SMS_PASSWORD || '';
   // Maximum 11 characters GSM alphanumeric sender ID (e.g. NYAMUYANJA)
-  const pandoraSenderId = env.PANDORA_SMS_SENDER_ID || 'NYAMUYANJA';
+  const pandoraSenderId = (env.PANDORA_SMS_SENDER_ID || 'NYAMUYANJA').replace(/[^a-zA-Z0-9]/g, '').slice(0, 11) || 'NYAMUYANJA';
 
-  if (isProduction && smsEnabled && smsProvider === 'AFRICAS_TALKING' && smsEnv === 'PRODUCTION') {
-    if (!atApiKey) {
-      throw new ConfigurationError('AT_API_KEY', 'Missing required environment variable: AT_API_KEY is required when SMS_ENVIRONMENT is set to PRODUCTION.');
+  if (isProduction && smsEnabled && process.env.NODE_ENV === 'production' && !process.env.CI) {
+    if (!pandoraPhoneNumber) {
+      console.warn('[CONFIG] PANDORA_SMS_PHONE_NUMBER is not set. SMS dispatch will queue messages until configured.');
     }
-    if (!atUsername || atUsername.toLowerCase() === 'sandbox') {
-      throw new ConfigurationError('AT_USERNAME', 'Invalid environment variable: AT_USERNAME cannot be "sandbox" when SMS_ENVIRONMENT is set to PRODUCTION.');
+    if (!pandoraPassword) {
+      console.warn('[CONFIG] PANDORA_SMS_PASSWORD is not set. SMS dispatch will queue messages until configured.');
     }
   }
 
@@ -194,14 +190,12 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
     },
     sms: {
       enabled: smsEnabled,
-      provider: smsProvider,
-      environment: smsEnv,
-      username: atUsername,
-      apiKey: atApiKey,
-      senderId: atSenderId,
+      provider: 'PANDORA',
+      senderId: pandoraSenderId,
       pandora: {
         apiUrl: pandoraApiUrl,
         balanceUrl: pandoraBalanceUrl,
+        phoneNumber: pandoraPhoneNumber,
         username: pandoraUsername,
         password: pandoraPassword,
         senderId: pandoraSenderId,

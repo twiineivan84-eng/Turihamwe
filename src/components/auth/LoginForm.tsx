@@ -300,11 +300,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onOpenSetupAdmin }) => {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 text-[11px]">
               <button
                 type="button"
-                onClick={() => handleSeedFill('itadm', 'NYAMUYANJA', 'Admin@2026!')}
+                onClick={() => handleSeedFill('ivan', 'NYAMUYANJA', '9090')}
                 className="text-left p-1.5 rounded bg-slate-50 hover:bg-blue-50 border border-slate-200 transition"
               >
-                <div className="font-semibold text-blue-800">itadm</div>
-                <div className="text-[9px] text-slate-500">IT Officer (Multi)</div>
+                <div className="font-semibold text-blue-800">ivan</div>
+                <div className="text-[9px] text-slate-500">IT Officer (Admin)</div>
               </button>
               <button
                 type="button"
