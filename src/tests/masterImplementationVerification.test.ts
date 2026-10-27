@@ -41,6 +41,9 @@ export async function runMasterVerificationSuite(): Promise<{
   console.log('   Institution: Nyamuyanja SACCO Ltd, Uganda');
   console.log('================================================================\n');
 
+  await serverStore.initialize();
+  await SeedService.seedInitialData();
+
   const originalFetch = globalThis.fetch;
   const originalSmsConfig = JSON.parse(JSON.stringify(config.sms));
   const originalSystemSettings = { ...serverStore.getSystemSettings() };
@@ -183,9 +186,10 @@ export async function runMasterVerificationSuite(): Promise<{
   try {
     // Plan expired 2 days ago during offline/downtime
     const pastDate = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0];
+    const missedAcc = `NYA-MISSED-${Date.now()}`;
     const missedPlan: TurihamwePlan = {
       id: `plan-missed-${Date.now()}`,
-      saccoAccountNumber: 'NYA-MISSED-01',
+      saccoAccountNumber: missedAcc,
       memberName: 'Missed Downtime Member',
       planCode: 'STANDARD',
       status: 'EXPIRED',
@@ -203,7 +207,7 @@ export async function runMasterVerificationSuite(): Promise<{
     serverStore.addPlan(missedPlan);
 
     const memberRec: SaccoMember = {
-      saccoAccountNumber: 'NYA-MISSED-01',
+      saccoAccountNumber: missedAcc,
       fullName: 'Missed Downtime Member',
       gender: 'FEMALE',
       dateOfBirth: '1990-03-20',
@@ -247,9 +251,10 @@ export async function runMasterVerificationSuite(): Promise<{
   // Test A5: Durable Idempotency and Duplicate Prevention
   try {
     const todayUganda = getUgandaDateString(new Date());
+    const dedupAcc = `NYA-DEDUP-${Date.now()}`;
     const dedupPlan: TurihamwePlan = {
       id: `plan-dedup-${Date.now()}`,
-      saccoAccountNumber: 'NYA-DEDUP-01',
+      saccoAccountNumber: dedupAcc,
       memberName: 'Idempotency Member',
       planCode: 'STANDARD',
       status: 'ACTIVE',
@@ -267,7 +272,7 @@ export async function runMasterVerificationSuite(): Promise<{
     serverStore.addPlan(dedupPlan);
 
     const dedupMember: SaccoMember = {
-      saccoAccountNumber: 'NYA-DEDUP-01',
+      saccoAccountNumber: dedupAcc,
       fullName: 'Idempotency Member',
       gender: 'MALE',
       dateOfBirth: '1985-07-15',
@@ -355,7 +360,7 @@ export async function runMasterVerificationSuite(): Promise<{
 
   // Test B3: Seed Synchronization & Stored Template Protection
   try {
-    SeedService.seedInitialData();
+    await SeedService.seedInitialData();
     const expiryTemplate = serverStore.getSmsTemplates().find(t => t.code === 'EXPIRY_DATE_NOTICE');
     const passed = Boolean(
       expiryTemplate &&
@@ -859,7 +864,7 @@ export async function runMasterVerificationSuite(): Promise<{
       (serverStore as any).state?.deletedUserTombstones?.some((t: any) => t.userId === disposableUserId);
 
     // 5. Simulate startup seeding (must NOT recreate deleted user)
-    SeedService.seedInitialData();
+    await SeedService.seedInitialData();
     const afterSeedQuery = serverStore.getUserById(disposableUserId);
     const afterSeedList = serverStore.getUsers().some(u => u.id === disposableUserId);
 

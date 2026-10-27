@@ -4,6 +4,7 @@ import { TurihamwePlan, SaccoMember, TurihamweRegistrationType } from '../../typ
 import { LocalRepository } from '../../db/local/localRepository';
 import { localDb } from '../../db/local/sqliteEngine';
 import { notifyRecordChanged } from '../../utils/systemEvents';
+import { calculateAnnualMaturityDate } from '../../utils/timezone';
 import { ShieldCheck, X, CheckCircle2, AlertCircle, Calendar, DollarSign, Info } from 'lucide-react';
 
 interface RegisterPlanModalProps {
@@ -29,7 +30,6 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
   const [member, setMember] = useState<SaccoMember | null>(preselectedMember || null);
   const [currentPlan, setCurrentPlan] = useState<TurihamwePlan | null>(existingPlan || null);
 
-  // Form Fields per PART A requirements
   const [registrationType, setRegistrationType] = useState<TurihamweRegistrationType>(
     existingPlan?.registrationType || 'Fresh Registration'
   );
@@ -38,24 +38,22 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
     existingPlan?.contributionAmount != null ? String(existingPlan.contributionAmount) : ''
   );
 
-  const [registrationDate, setRegistrationDate] = useState<string>(
+  // Dedicated required Subscription Date (actual plan subscription date)
+  const initialSubscriptionDate = existingPlan?.subscriptionDate ||
     existingPlan?.registrationDate ||
     existingPlan?.enrolmentDate ||
     existingPlan?.effectiveStartDate ||
-    new Date().toISOString().split('T')[0]
+    '';
+
+  const [subscriptionDate, setSubscriptionDate] = useState<string>(initialSubscriptionDate);
+  const [maturityDate, setMaturityDate] = useState<string>(
+    existingPlan?.maturityDate ||
+    existingPlan?.currentExpiryDate ||
+    existingPlan?.expiryDate ||
+    (initialSubscriptionDate ? calculateAnnualMaturityDate(initialSubscriptionDate) : '')
   );
 
-  // Expiry date: manually editable, preserved across saving/reloads
-  const defaultExpiry = () => {
-    const d = new Date();
-    d.setFullYear(d.getFullYear() + 1);
-    return d.toISOString().split('T')[0];
-  };
-
-  const [expiryDate, setExpiryDate] = useState<string>(
-    existingPlan?.expiryDate || existingPlan?.currentExpiryDate || defaultExpiry()
-  );
-
+  const [justificationReason, setJustificationReason] = useState('');
   const [notes, setNotes] = useState(existingPlan?.notes || '');
   const [searching, setSearching] = useState(false);
   const [memberError, setMemberError] = useState<string | null>(null);
@@ -63,6 +61,19 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
 
   const canRegister = hasPermission('turihamwe.register_plan') || hasPermission('members.edit');
+
+  // When subscriptionDate changes, automatically calculate annual maturity date (1-year anniversary)
+  const handleSubscriptionDateChange = (newDateStr: string) => {
+    setSubscriptionDate(newDateStr);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(newDateStr)) {
+      try {
+        const calculated = calculateAnnualMaturityDate(newDateStr);
+        setMaturityDate(calculated);
+      } catch {
+        // Ignored
+      }
+    }
+  };
 
   // Synchronize when preselectedMember or existingPlan changes
   useEffect(() => {
@@ -73,19 +84,34 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
       if (existingPlan.contributionAmount != null) {
         setContributionAmount(String(existingPlan.contributionAmount));
       }
-      setRegistrationDate(
+      const existingSubDate = existingPlan.subscriptionDate ||
         existingPlan.registrationDate ||
         existingPlan.enrolmentDate ||
         existingPlan.effectiveStartDate ||
-        new Date().toISOString().split('T')[0]
+        '';
+      setSubscriptionDate(existingSubDate);
+      setMaturityDate(
+        existingPlan.maturityDate ||
+        existingPlan.currentExpiryDate ||
+        existingPlan.expiryDate ||
+        (existingSubDate ? calculateAnnualMaturityDate(existingSubDate) : '')
       );
-      setExpiryDate(existingPlan.expiryDate || existingPlan.currentExpiryDate || defaultExpiry());
       setNotes(existingPlan.notes || '');
       verifyMember(existingPlan.saccoAccountNumber);
     } else if (preselectedMember) {
       setMember(preselectedMember);
       setSaccoAccountNumber(preselectedMember.saccoAccountNumber);
       checkForExistingPlan(preselectedMember.saccoAccountNumber);
+      // For fresh registration, if no subscription date yet, leave empty or default to today without forcing
+      if (!subscriptionDate) {
+        const today = new Date().toISOString().split('T')[0];
+        setSubscriptionDate(today);
+        setMaturityDate(calculateAnnualMaturityDate(today));
+      }
+    } else if (isOpen && !subscriptionDate) {
+      const today = new Date().toISOString().split('T')[0];
+      setSubscriptionDate(today);
+      setMaturityDate(calculateAnnualMaturityDate(today));
     }
   }, [existingPlan, preselectedMember, isOpen]);
 
@@ -94,7 +120,7 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
   const checkForExistingPlan = async (accountNo: string) => {
     try {
       const token = localStorage.getItem('turihamwe_token');
-      const res = await fetch(`/api/turihamwe/plans/member/${accountNo}`, {
+      const res = await fetch(`/api/turihamwe/plans/account/${accountNo}`, {
         headers: {
           Authorization: token ? `Bearer ${token}` : '',
           'x-working-branch': workingBranch?.id || '',
@@ -105,11 +131,10 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
         setCurrentPlan(p);
         if (p.registrationType) setRegistrationType(p.registrationType);
         if (p.contributionAmount != null) setContributionAmount(String(p.contributionAmount));
-        if (p.registrationDate || p.effectiveStartDate) {
-          setRegistrationDate(p.registrationDate || p.effectiveStartDate);
-        }
-        if (p.expiryDate || p.currentExpiryDate) {
-          setExpiryDate(p.expiryDate || p.currentExpiryDate);
+        const subDate = p.subscriptionDate || p.registrationDate || p.effectiveStartDate || '';
+        if (subDate) {
+          setSubscriptionDate(subDate);
+          setMaturityDate(p.maturityDate || p.currentExpiryDate || calculateAnnualMaturityDate(subDate));
         }
         if (p.notes) setNotes(p.notes);
       } else {
@@ -120,11 +145,10 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
           setCurrentPlan(match);
           if (match.registrationType) setRegistrationType(match.registrationType);
           if (match.contributionAmount != null) setContributionAmount(String(match.contributionAmount));
-          if (match.registrationDate || match.effectiveStartDate) {
-            setRegistrationDate(match.registrationDate || match.effectiveStartDate);
-          }
-          if (match.expiryDate || match.currentExpiryDate) {
-            setExpiryDate(match.expiryDate || match.currentExpiryDate);
+          const subDate = match.subscriptionDate || match.registrationDate || match.effectiveStartDate || '';
+          if (subDate) {
+            setSubscriptionDate(subDate);
+            setMaturityDate(match.maturityDate || match.currentExpiryDate || calculateAnnualMaturityDate(subDate));
           }
           if (match.notes) setNotes(match.notes);
         }
@@ -175,6 +199,10 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
     }
   };
 
+  const isEditingSubscriptionDate = currentPlan &&
+    (currentPlan.subscriptionDate || currentPlan.registrationDate || currentPlan.effectiveStartDate) &&
+    subscriptionDate !== (currentPlan.subscriptionDate || currentPlan.registrationDate || currentPlan.effectiveStartDate);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canRegister) {
@@ -192,20 +220,22 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
       return;
     }
 
-    // Validate registration date
-    if (!registrationDate || !/^\d{4}-\d{2}-\d{2}$/.test(registrationDate)) {
-      setSubmitError('Please provide a valid Registration Date (YYYY-MM-DD).');
+    // Validate subscription date (mandatory requirement)
+    if (!subscriptionDate || !/^\d{4}-\d{2}-\d{2}$/.test(subscriptionDate)) {
+      setSubmitError('Please provide a valid Subscription Date (YYYY-MM-DD).');
       return;
     }
 
-    // Validate expiry date
-    if (!expiryDate || !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) {
-      setSubmitError('Please provide a valid Expiry Date (YYYY-MM-DD).');
+    // Validate maturity date
+    const computedMaturity = maturityDate || calculateAnnualMaturityDate(subscriptionDate);
+    if (!computedMaturity || !/^\d{4}-\d{2}-\d{2}$/.test(computedMaturity)) {
+      setSubmitError('Invalid annual maturity date calculation.');
       return;
     }
 
-    if (expiryDate <= registrationDate) {
-      setSubmitError('Expiry date must be after the registration date.');
+    // If changing subscription date on an existing plan, justification is required
+    if (isEditingSubscriptionDate && !justificationReason.trim()) {
+      setSubmitError('A justification reason is required when modifying a member\'s recorded subscription date.');
       return;
     }
 
@@ -214,7 +244,7 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
     if (contributionAmount !== '') {
       const num = Number(contributionAmount);
       if (isNaN(num) || num < 0) {
-        setSubmitError('Contribution amount must be a valid, non-negative number in UGX.');
+        setSubmitError('Contribution amount must be a valid, positive number in UGX.');
         return;
       }
       parsedContribution = num;
@@ -228,10 +258,13 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
         saccoAccountNumber: member.saccoAccountNumber,
         registrationType,
         contributionAmount: parsedContribution,
-        registrationDate,
-        expiryDate,
-        effectiveStartDate: registrationDate,
-        currentExpiryDate: expiryDate,
+        subscriptionDate,
+        maturityDate: computedMaturity,
+        registrationDate: subscriptionDate,
+        expiryDate: computedMaturity,
+        effectiveStartDate: subscriptionDate,
+        currentExpiryDate: computedMaturity,
+        justificationReason: justificationReason.trim() || undefined,
         notes: notes.trim(),
         isRecordKeepingOnly: true,
       };
@@ -289,7 +322,7 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
             <ShieldCheck className="w-5 h-5 text-blue-400" />
             <div>
               <h2 className="text-sm font-bold uppercase tracking-wider">
-                {currentPlan ? 'Update Turihamwe Record' : 'Record Turihamwe Registration & Contribution'}
+                {currentPlan ? 'Update Turihamwe Plan Record' : 'Record Turihamwe Registration & Plan'}
               </h2>
               <p className="text-[11px] text-slate-400">
                 Operating Branch: <span className="text-white font-semibold">{workingBranch?.name}</span>
@@ -304,39 +337,38 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
           </button>
         </div>
 
-        {/* Informational Separation Banner */}
-        <div className="mx-6 mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-900 flex items-start gap-2">
-          <Info className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
-          <div className="leading-relaxed">
-            <span className="font-bold">Record-Keeping Only:</span> This form records Turihamwe registration details and historical contributions for SACCO members. It does <strong>not</strong> initiate financial transactions, generate cashbook entries, or issue transaction receipts.
-          </div>
+        {/* Business Rule Notice */}
+        <div className="px-6 py-2 bg-blue-50 border-b border-blue-200 text-[11px] text-blue-900 flex items-center gap-2">
+          <Info className="w-4 h-4 text-blue-700 shrink-0" />
+          <span>
+            <strong>Annual Cycle Rule:</strong> Annual maturity date is calculated as exactly 1 year from the member's subscription date. Historical subscription dates are preserved.
+          </span>
         </div>
 
         {submitError && (
-          <div className="mx-6 mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-start gap-2">
+          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
             <span>{submitError}</span>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
-          {/* Member Selection / Verification */}
+          {/* Member SACCO Account Number */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Member SACCO Account Number *
+            <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+              SACCO Account Number *
             </label>
             <div className="flex gap-2">
               <input
                 type="text"
+                disabled={!!currentPlan || !!preselectedMember}
                 value={saccoAccountNumber}
                 onChange={e => setSaccoAccountNumber(e.target.value.toUpperCase())}
-                onBlur={() => verifyMember(saccoAccountNumber)}
                 placeholder="e.g. NYA-001042"
-                disabled={Boolean(existingPlan)}
-                className="flex-1 px-3 py-2 font-mono uppercase bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:bg-white disabled:opacity-70"
+                className="flex-1 px-3 py-2 text-xs font-mono uppercase bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
                 required
               />
-              {!existingPlan && (
+              {!currentPlan && !preselectedMember && (
                 <button
                   type="button"
                   onClick={() => verifyMember(saccoAccountNumber)}
@@ -347,42 +379,36 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
                 </button>
               )}
             </div>
-            {memberError && <p className="text-[11px] text-red-600 mt-1">{memberError}</p>}
+            {memberError && <p className="text-[11px] text-red-600 font-medium mt-1">{memberError}</p>}
           </div>
 
-          {/* Member Card & Existing Plan Status */}
+          {/* Member Card */}
           {member && (
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1.5">
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
               <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">SACCO Member:</span>
                 <span className="font-bold text-slate-900">{member.fullName}</span>
+                <span className="text-[10px] font-mono bg-blue-100 text-blue-900 px-2 py-0.5 rounded font-bold">
+                  {member.saccoAccountNumber}
+                </span>
               </div>
-              <div className="flex justify-between items-center text-[11px]">
-                <span className="text-slate-500">Registered Branch:</span>
-                <span className="text-slate-700 font-semibold">{member.branchName || 'SACCO Branch'}</span>
+              <div className="text-[11px] text-slate-600 flex justify-between">
+                <span>Branch: {member.branchName || workingBranch?.name}</span>
+                <span>Phone: {member.primaryPhone}</span>
               </div>
-              {currentPlan && (
-                <div className="mt-2 pt-2 border-t border-slate-200 flex justify-between items-center">
-                  <span className="text-slate-600 text-[11px]">Existing Turihamwe Plan:</span>
-                  <span className="font-mono text-[11px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded">
-                    {currentPlan.id} ({currentPlan.status})
-                  </span>
-                </div>
-              )}
             </div>
           )}
 
-          {/* A. Registration Type */}
+          {/* Registration Type */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-              A. Registration Type *
+            <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Registration Type *
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label
-                className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition ${
+                className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition ${
                   registrationType === 'Fresh Registration'
-                    ? 'border-blue-600 bg-blue-50/60 font-bold text-blue-900 ring-1 ring-blue-500'
-                    : 'border-slate-300 hover:bg-slate-50 text-slate-700'
+                    ? 'border-blue-600 bg-blue-50 text-blue-950 font-bold'
+                    : 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700'
                 }`}
               >
                 <input
@@ -391,19 +417,16 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
                   value="Fresh Registration"
                   checked={registrationType === 'Fresh Registration'}
                   onChange={() => setRegistrationType('Fresh Registration')}
-                  className="text-blue-600 focus:ring-blue-500"
+                  className="text-blue-600"
                 />
-                <div>
-                  <div className="font-bold">Fresh Registration</div>
-                  <div className="text-[10px] text-slate-500 font-normal">First-time enrolment in Turihamwe</div>
-                </div>
+                <span>Fresh Registration</span>
               </label>
 
               <label
-                className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition ${
+                className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition ${
                   registrationType === 'Renewal'
-                    ? 'border-blue-600 bg-blue-50/60 font-bold text-blue-900 ring-1 ring-blue-500'
-                    : 'border-slate-300 hover:bg-slate-50 text-slate-700'
+                    ? 'border-purple-600 bg-purple-50 text-purple-950 font-bold'
+                    : 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700'
                 }`}
               >
                 <input
@@ -412,109 +435,114 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
                   value="Renewal"
                   checked={registrationType === 'Renewal'}
                   onChange={() => setRegistrationType('Renewal')}
-                  className="text-blue-600 focus:ring-blue-500"
+                  className="text-purple-600"
                 />
-                <div>
-                  <div className="font-bold">Renewal</div>
-                  <div className="text-[10px] text-slate-500 font-normal">Continuation of existing policy</div>
-                </div>
+                <span>Renewal</span>
               </label>
             </div>
           </div>
 
-          {/* B. Contribution Amount */}
+          {/* Dedicated Subscription Date & Auto-Calculated Annual Maturity Date */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Subscription Date *
+              </label>
+              <input
+                type="date"
+                value={subscriptionDate}
+                onChange={e => handleSubscriptionDateChange(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:bg-white"
+                required
+              />
+              <p className="text-[10px] text-slate-500 mt-1">Actual date member subscribed to annual plan</p>
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Annual Maturity Date (Calculated) *
+              </label>
+              <input
+                type="date"
+                value={maturityDate}
+                onChange={e => setMaturityDate(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-mono font-bold text-emerald-800 bg-emerald-50/50 border border-emerald-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-600"
+                required
+              />
+              <p className="text-[10px] text-emerald-700 mt-1">Exactly 1-year anniversary from subscription date</p>
+            </div>
+          </div>
+
+          {/* If subscription date is edited on existing plan, require justification */}
+          {isEditingSubscriptionDate && (
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 space-y-1">
+              <label className="block text-xs font-bold text-amber-900">
+                Subscription Date Change Justification *
+              </label>
+              <p className="text-[11px] text-amber-700">
+                You are modifying the recorded subscription date from {currentPlan?.subscriptionDate || currentPlan?.registrationDate || currentPlan?.effectiveStartDate} to {subscriptionDate}. An audited justification is required.
+              </p>
+              <input
+                type="text"
+                value={justificationReason}
+                onChange={e => setJustificationReason(e.target.value)}
+                placeholder="e.g. Correcting historical ledger subscription date per approved SACCO file"
+                required
+                className="w-full px-3 py-2 text-xs bg-white border border-amber-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-600"
+              />
+            </div>
+          )}
+
+          {/* Contribution Amount */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              B. Contribution Amount (UGX)
+            <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Initial Contribution Amount (UGX)
             </label>
             <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 font-bold text-xs">
-                UGX
-              </span>
+              <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">UGX</span>
               <input
                 type="number"
                 min="0"
                 step="500"
                 value={contributionAmount}
                 onChange={e => setContributionAmount(e.target.value)}
-                placeholder="e.g. 20000"
-                className="w-full pl-12 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:bg-white font-mono font-semibold text-slate-900"
+                placeholder="e.g. 75000"
+                className="w-full pl-12 pr-3 py-2 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:bg-white"
               />
             </div>
-            <p className="text-[10px] text-slate-500 mt-1">
-              Recorded for administrative tracking only. No financial payment or receipt is triggered.
-            </p>
+            <p className="text-[10px] text-slate-500 mt-1">Optional initial contribution recorded upon registration</p>
           </div>
 
-          {/* C. Registration Date & D. Expiry Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                C. Registration Date *
-              </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={registrationDate}
-                  onChange={e => setRegistrationDate(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:bg-white font-mono"
-                  required
-                />
-              </div>
-              <p className="text-[10px] text-slate-500 mt-1">
-                Editable historical date. Preserved exactly as entered.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                D. Expiry Date *
-              </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={expiryDate}
-                  onChange={e => setExpiryDate(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:bg-white font-mono font-bold text-emerald-800"
-                  required
-                />
-              </div>
-              <p className="text-[10px] text-slate-500 mt-1">
-                Editable expiry date. Never silently overwritten.
-              </p>
-            </div>
-          </div>
-
-          {/* Notes / Comments */}
+          {/* Notes */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Record Notes & Historical References
+            <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Policy Notes / Reference
             </label>
             <textarea
               rows={2}
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder="e.g. Migrated from manual Turihamwe register 2024 / Cashbook reference"
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:bg-white"
+              placeholder="e.g. Initial policy enrollment recorded at branch"
+              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:bg-white"
             />
           </div>
 
-          {/* Action Buttons */}
+          {/* Footer Buttons */}
           <div className="pt-3 border-t border-slate-200 flex justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold"
+              className="px-4 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting || !member}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg font-bold shadow-xs transition disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition disabled:opacity-50"
             >
               <CheckCircle2 className="w-4 h-4" />
-              {submitting ? 'Saving...' : currentPlan ? 'Save Turihamwe Record' : 'Record Turihamwe Enrolment'}
+              {submitting ? 'Saving Record...' : currentPlan ? 'Update Plan' : 'Save Turihamwe Plan'}
             </button>
           </div>
         </form>

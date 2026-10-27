@@ -8,10 +8,13 @@ import {
   ExpiryRecord,
   ExpiryAlertCategory,
   Beneficiary,
-  PlanReactivationLog
+  PlanReactivationLog,
+  Branch
 } from '../types';
 import { LocalRepository } from '../db/local/localRepository';
 import { localDb } from '../db/local/sqliteEngine';
+import { INITIAL_BRANCHES } from '../constants/branches';
+import { apiClient } from '../api/client';
 import {
   ShieldCheck,
   Users,
@@ -35,7 +38,8 @@ import {
   AlertTriangle,
   FileText,
   Eye,
-  Lock
+  Lock,
+  Building2
 } from 'lucide-react';
 
 import { RecordContributionModal } from '../components/turihamwe/RecordContributionModal';
@@ -90,6 +94,7 @@ export const TurihamweView: React.FC = () => {
 
   // Modals
   const [isRecordContribOpen, setIsRecordContribOpen] = useState(false);
+  const [selectedPlanForContribution, setSelectedPlanForContribution] = useState<TurihamwePlan | null>(null);
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
   const [selectedContributionForReceipt, setSelectedContributionForReceipt] = useState<Contribution | null>(null);
 
@@ -104,6 +109,7 @@ export const TurihamweView: React.FC = () => {
 
   const [isRegisterPlanOpen, setIsRegisterPlanOpen] = useState(false);
   const [selectedPlanForEdit, setSelectedPlanForEdit] = useState<TurihamwePlan | null>(null);
+  const [preselectedMemberForRegistration, setPreselectedMemberForRegistration] = useState<any | null>(null);
   const [isBusinessRulesOpen, setIsBusinessRulesOpen] = useState(false);
 
   // Load Data
@@ -302,21 +308,28 @@ export const TurihamweView: React.FC = () => {
 
           {canRecordContribution && (
             <button
-              onClick={() => setIsRecordContribOpen(true)}
+              onClick={() => {
+                setSelectedPlanForContribution(null);
+                setIsRecordContribOpen(true);
+              }}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition"
             >
               <DollarSign className="w-4 h-4" />
-              Record Contribution
+              + Add Contribution
             </button>
           )}
 
           {canRegisterPlan && (
             <button
-              onClick={() => setIsRegisterPlanOpen(true)}
+              onClick={() => {
+                setSelectedPlanForEdit(null);
+                setPreselectedMemberForRegistration(null);
+                setIsRegisterPlanOpen(true);
+              }}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition"
             >
               <PlusCircle className="w-4 h-4" />
-              Register Plan
+              Record Turihamwe Plan
             </button>
           )}
         </div>
@@ -551,14 +564,28 @@ export const TurihamweView: React.FC = () => {
                     Recent Contribution Records
                   </span>
                 </div>
-                {canViewContributions && (
-                  <button
-                    onClick={() => setActiveSubTab('contributions')}
-                    className="text-xs font-bold text-blue-700 hover:underline"
-                  >
-                    View All &rarr;
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {canRecordContribution && (
+                    <button
+                      onClick={() => {
+                        setSelectedPlanForContribution(null);
+                        setIsRecordContribOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold transition shadow-xs"
+                    >
+                      <PlusCircle className="w-3 h-3" />
+                      + Add Contribution
+                    </button>
+                  )}
+                  {canViewContributions && (
+                    <button
+                      onClick={() => setActiveSubTab('contributions')}
+                      className="text-xs font-bold text-blue-700 hover:underline"
+                    >
+                      View All &rarr;
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -705,11 +732,14 @@ export const TurihamweView: React.FC = () => {
             </div>
             {canRecordContribution && (
               <button
-                onClick={() => setIsRecordContribOpen(true)}
+                onClick={() => {
+                  setSelectedPlanForContribution(null);
+                  setIsRecordContribOpen(true);
+                }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition shadow-xs"
               >
                 <PlusCircle className="w-3.5 h-3.5" />
-                Record Contribution
+                + Add Contribution
               </button>
             )}
           </div>
@@ -1040,18 +1070,33 @@ export const TurihamweView: React.FC = () => {
                 Primary Master Coverage Directory Linked to SACCO Member Identifiers
               </p>
             </div>
-            {canRegisterPlan && (
-              <button
-                onClick={() => {
-                  setSelectedPlanForEdit(null);
-                  setIsRegisterPlanOpen(true);
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold transition shadow-xs"
-              >
-                <PlusCircle className="w-3.5 h-3.5" />
-                Record Turihamwe Registration & Contribution
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {canRecordContribution && (
+                <button
+                  onClick={() => {
+                    setSelectedPlanForContribution(null);
+                    setIsRecordContribOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition shadow-xs"
+                >
+                  <DollarSign className="w-3.5 h-3.5" />
+                  + Add Contribution
+                </button>
+              )}
+              {canRegisterPlan && (
+                <button
+                  onClick={() => {
+                    setSelectedPlanForEdit(null);
+                    setPreselectedMemberForRegistration(null);
+                    setIsRegisterPlanOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold transition shadow-xs"
+                >
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  Record Turihamwe Registration & Contribution
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -1117,12 +1162,14 @@ export const TurihamweView: React.FC = () => {
                         {canRecordContribution && (
                           <button
                             onClick={() => {
-                              setSelectedPlanForRenewal(p);
+                              setSelectedPlanForContribution(p);
                               setIsRecordContribOpen(true);
                             }}
-                            className="text-emerald-700 hover:underline font-bold text-[11px]"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 font-bold text-[11px] transition shadow-2xs"
+                            title="Add contribution for this member plan"
                           >
-                            + Contrib
+                            <DollarSign className="w-3 h-3" />
+                            + Add Contribution
                           </button>
                         )}
                         {canRecordRenewal && (
@@ -1253,9 +1300,14 @@ export const TurihamweView: React.FC = () => {
         isOpen={isRecordContribOpen}
         onClose={() => {
           setIsRecordContribOpen(false);
-          setSelectedPlanForRenewal(null);
+          setSelectedPlanForContribution(null);
         }}
-        preselectedPlan={selectedPlanForRenewal}
+        preselectedPlan={selectedPlanForContribution}
+        onOpenRegisterPlan={mem => {
+          setPreselectedMemberForRegistration(mem);
+          setSelectedPlanForEdit(null);
+          setIsRegisterPlanOpen(true);
+        }}
         onSuccess={newContrib => {
           setSelectedContributionForReceipt(newContrib);
           setIsReceiptOpen(true);
@@ -1320,13 +1372,16 @@ export const TurihamweView: React.FC = () => {
       <RegisterPlanModal
         isOpen={isRegisterPlanOpen}
         existingPlan={selectedPlanForEdit}
+        preselectedMember={preselectedMemberForRegistration}
         onClose={() => {
           setIsRegisterPlanOpen(false);
           setSelectedPlanForEdit(null);
+          setPreselectedMemberForRegistration(null);
         }}
         onSuccess={savedPlan => {
           notifyRecordChanged('PLAN', selectedPlanForEdit ? 'UPDATED' : 'CREATED', (savedPlan as any)?.id || 'plan', savedPlan);
           setSelectedPlanForEdit(null);
+          setPreselectedMemberForRegistration(null);
           loadTurihamweData();
         }}
       />

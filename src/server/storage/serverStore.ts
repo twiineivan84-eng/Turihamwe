@@ -41,39 +41,56 @@ import {
 } from '../../types';
 import { INITIAL_BRANCHES } from '../../constants/branches';
 import { DEFAULT_ROLES, SYSTEM_PERMISSIONS } from '../../constants/permissions';
-import { diffInUgandaCalendarDays, getUgandaDateString } from '../../utils/timezone';
+import { diffInUgandaCalendarDays, getUgandaDateString, calculateAnnualMaturityDate } from '../../utils/timezone';
 
 export const DEFAULT_BUSINESS_RULES: BusinessRulesConfig = {
   contributionAmount: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL',
+    status: 'ACTIVE_POLICY',
     defaultAmount: null,
     isConfigurable: true,
-    notes: 'Contribution amounts remain unprescribed pending SACCO board specification.',
+    notes: 'Contributions must be recorded against a verified Turihamwe member plan as a positive monetary value in UGX without unapproved arbitrary limits.',
   },
   contributionFrequency: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL',
-    allowedFrequencies: ['ANNUAL', 'SEMI_ANNUAL', 'QUARTERLY', 'MONTHLY', 'FLEXIBLE'],
-    defaultFrequency: null,
+    status: 'ACTIVE_POLICY',
+    allowedFrequencies: ['ANNUAL'],
+    defaultFrequency: 'ANNUAL',
     isConfigurable: true,
-    notes: 'Frequency schedules are configurable hooks without hardcoded business rules.',
+    notes: 'Turihamwe operates strictly on an annual cycle calculated from the member explicitly recorded subscription date.',
+  },
+  planDuration: {
+    status: 'ACTIVE_POLICY',
+    durationYears: 1,
+    notes: 'Annual cover runs exactly one year from recorded subscription date without silent recalculation on view or edit.',
+  },
+  alertSchedule: {
+    status: 'ACTIVE_POLICY',
+    triggerEvent: 'EXACT_MATURITY_DATE',
+    advanceRemindersEnabled: false,
+    notes: 'Approved SMS reminder is scheduled and triggered automatically on the actual maturity date only. Arbitrary advance windows are disabled.',
+  },
+  financialPenalties: {
+    status: 'STRICTLY_PROHIBITED',
+    automaticLateFees: false,
+    automaticDeductions: false,
+    notes: 'No automatic late fees, interest, deductions, or financial penalties are permitted under established SACCO policy.',
   },
   gracePeriodDays: {
     status: 'PENDING_INSTITUTIONAL_APPROVAL',
     defaultDays: null,
     isConfigurable: true,
-    notes: 'Grace period durations are not finalized by policy and remain configurable.',
+    notes: 'Grace period terms remain pending SACCO board specification; no penalties imposed.',
   },
   renewalCoverPeriodMonths: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL',
-    defaultMonths: null,
+    status: 'ACTIVE_POLICY',
+    defaultMonths: 12,
     isConfigurable: true,
-    notes: 'Renewal duration calculation is pending executive signoff.',
+    notes: 'Approved renewals extend policy for exactly 12 months based on explicit renewal recording.',
   },
   reactivationEligibility: {
-    status: 'PENDING_EXECUTIVE_POLICY',
+    status: 'CONTROLLED_WORKFLOW',
     requiresBoardApproval: false,
     isConfigurable: true,
-    notes: 'Reactivation requires authorized officer review with justification reasons.',
+    notes: 'Reactivation requires authorized staff review with documented justification reason and immutable audit trail.',
   },
   claimQualifyingEvents: {
     status: 'PENDING_INSTITUTIONAL_APPROVAL',
@@ -209,8 +226,8 @@ class ServerStore {
     businessRulesConfig: { ...DEFAULT_BUSINESS_RULES },
     backups: [],
     backupConfig: { ...DEFAULT_BACKUP_CONFIG },
-    deletedUserIds: [],
-    deletedUserUsernames: [],
+    deletedUserIds: ['usr-it-01'],
+    deletedUserUsernames: ['itadm'],
   };
 
   private initialized = false;
@@ -283,6 +300,16 @@ class ServerStore {
       }
     }
 
+    // Part B requirement: Ensure dummy account itadm is permanently tombstoned and non-resurrectable
+    this.state.deletedUserUsernames = this.state.deletedUserUsernames || [];
+    this.state.deletedUserIds = this.state.deletedUserIds || [];
+    if (!this.state.deletedUserUsernames.includes('itadm')) {
+      this.state.deletedUserUsernames.push('itadm');
+    }
+    if (!this.state.deletedUserIds.includes('usr-it-01')) {
+      this.state.deletedUserIds.push('usr-it-01');
+    }
+
     // Durably purge any deleted users from in-memory state
     this.state.users = (this.state.users || []).filter(
       u => !this.isUserDeleted(u.id) && !this.isUserDeleted(u.username)
@@ -308,6 +335,33 @@ class ServerStore {
     this.state.plans = this.state.plans.filter(p =>
       this.state.members.some(m => m.saccoAccountNumber.toUpperCase() === p.saccoAccountNumber.toUpperCase())
     );
+
+    // Non-destructive preservation and normalization for Turihamwe plans:
+    for (const p of this.state.plans) {
+      if (!p.subscriptionDate) {
+        const historicalDate = p.registrationDate || p.enrolmentDate || p.effectiveStartDate;
+        if (historicalDate) {
+          p.subscriptionDate = historicalDate;
+        } else {
+          p.requiresReview = true;
+          p.reviewReason = 'Historical plan missing explicit subscription date; awaiting authorized review.';
+        }
+      }
+      if (!p.maturityDate) {
+        p.maturityDate = p.currentExpiryDate || p.expiryDate;
+      }
+      if (!p.nextScheduledAlertDate && p.currentExpiryDate) {
+        p.nextScheduledAlertDate = p.currentExpiryDate;
+        p.lastAlertStatus = p.lastAlertStatus || 'SCHEDULED';
+      }
+      if (p.lastContributionAmount === undefined) {
+        const planContribs = (this.state.contributions || []).filter(c => c.planId === p.id && c.status !== 'CANCELLED');
+        if (planContribs.length > 0) {
+          p.lastContributionAmount = planContribs[0].amount;
+          p.lastContributionDate = planContribs[0].contributionDate;
+        }
+      }
+    }
 
     // Ensure 6 branches exist
     if (this.state.branches.length === 0) {
@@ -358,55 +412,53 @@ class ServerStore {
     this.seedDefaultDataIfEmpty();
 
     // Ensure baseline verified backup exists and is synchronized with disk storage
-    if (this.state.backups.length > 0) {
-      const validBackups = this.state.backups.filter(b => fs.existsSync(path.join(BACKUPS_DIR, b.filename)));
-      if (validBackups.length > 0) {
-        this.state.backups = validBackups;
-      } else {
-        let reconciled = false;
-        if (fs.existsSync(BACKUPS_DIR)) {
-          const files = fs.readdirSync(BACKUPS_DIR).filter(f => f.startsWith('turihamwe_backup_') && f.endsWith('.json'));
-          if (files.length > 0) {
-            const latestFile = files.sort().reverse()[0];
-            const fullPath = path.join(BACKUPS_DIR, latestFile);
-            const content = fs.readFileSync(fullPath, 'utf8');
-            const checksum = crypto.createHash('sha256').update(content).digest('hex');
-            const sizeBytes = Buffer.byteLength(content, 'utf8');
-            const match = latestFile.match(/turihamwe_backup_(.+)\.json/);
-            const tsSlug = match ? match[1] : 'baseline';
-            const bkpRecord: BackupRecord = {
-              id: `BKP-${tsSlug}-01A7F2`,
-              filename: latestFile,
-              createdAt: new Date().toISOString(),
-              sizeBytes,
-              checksum,
-              createdByUserId: 'usr-it-01',
-              createdByUsername: 'itadm',
-              createdByUserFullName: 'IT Systems Officer',
-              type: 'MANUAL',
-              status: 'VERIFIED',
-              verifiedAt: new Date().toISOString(),
-              verifiedByUserId: 'usr-it-01',
-              verifiedByUsername: 'itadm',
-              verificationDetails: 'Cryptographic SHA-256 integrity match.',
-              notes: 'Initial institutional verified baseline backup archive',
-              recordCounts: {
-                members: this.state.members.length,
-                plans: this.state.plans.length,
-                contributions: this.state.contributions.length,
-                renewals: this.state.renewals.length,
-                claims: this.state.claims.length,
-                users: this.state.users.length,
-                auditLogs: this.state.auditLogs.length,
-              },
-            };
-            this.state.backups = [bkpRecord];
-            reconciled = true;
-          }
-        }
-        if (!reconciled) {
-          this.state.backups = [];
-          this.createInitialBaselineBackup();
+    if (!fs.existsSync(BACKUPS_DIR)) {
+      fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+    }
+
+    // Filter out stale in-memory backup records that no longer exist on disk
+    this.state.backups = (this.state.backups || []).filter(b => fs.existsSync(path.join(BACKUPS_DIR, b.filename)));
+
+    const existingBackupFiles = fs.readdirSync(BACKUPS_DIR).filter(f => f.startsWith('turihamwe_backup_') && f.endsWith('.json'));
+    if (existingBackupFiles.length > 0) {
+      for (const file of existingBackupFiles) {
+        const fullPath = path.join(BACKUPS_DIR, file);
+        const content = fs.readFileSync(fullPath, 'utf8');
+        const checksum = crypto.createHash('sha256').update(content).digest('hex');
+        const sizeBytes = Buffer.byteLength(content, 'utf8');
+        const existing = this.state.backups.find(b => b.filename === file);
+        if (existing) {
+          existing.checksum = checksum;
+          existing.sizeBytes = sizeBytes;
+        } else {
+          const match = file.match(/turihamwe_backup_(.+)\.json/);
+          const tsSlug = match ? match[1] : 'baseline';
+          this.state.backups.unshift({
+            id: `BKP-${tsSlug}-01A7F2`,
+            filename: file,
+            createdAt: new Date().toISOString(),
+            sizeBytes,
+            checksum,
+            createdByUserId: 'usr-it-ivan',
+            createdByUsername: 'ivan',
+            createdByUserFullName: 'Ivan (IT Officer)',
+            type: 'MANUAL',
+            status: 'VERIFIED',
+            verifiedAt: new Date().toISOString(),
+            verifiedByUserId: 'usr-it-ivan',
+            verifiedByUsername: 'ivan',
+            verificationDetails: 'Cryptographic SHA-256 integrity match.',
+            notes: 'Initial institutional verified baseline backup archive',
+            recordCounts: {
+              members: this.state.members.length,
+              plans: this.state.plans.length,
+              contributions: this.state.contributions.length,
+              renewals: this.state.renewals.length,
+              claims: this.state.claims.length,
+              users: this.state.users.length,
+              auditLogs: this.state.auditLogs.length,
+            },
+          });
         }
       }
     } else {
@@ -785,7 +837,11 @@ class ServerStore {
   }
 
   public getBranchById(id: string): Branch | undefined {
-    return this.state.branches.find(b => b.id === id);
+    if (!id) return undefined;
+    const clean = id.trim().toLowerCase();
+    return this.state.branches.find(
+      b => b.id.toLowerCase() === clean || b.code.toLowerCase() === clean
+    );
   }
 
   public getBranchByCode(code: string): Branch | undefined {
@@ -851,8 +907,12 @@ class ServerStore {
   }
 
   public getUserByUsername(username: string): User | undefined {
-    if (this.isUserDeleted(username)) return undefined;
-    const user = this.state.users.find(u => u.username.toLowerCase() === username.toLowerCase());
+    if (!username) return undefined;
+    const clean = username.trim().toLowerCase();
+    if (this.isUserDeleted(clean)) return undefined;
+    const user = this.state.users.find(
+      u => u.username.toLowerCase() === clean
+    );
     if (user && this.isUserDeleted(user.id)) return undefined;
     return user;
   }
@@ -1165,13 +1225,21 @@ class ServerStore {
   }
 
   public addPlan(plan: TurihamwePlan): void {
-    // Preserve manually entered registration and expiry dates
+    const subDate = plan.subscriptionDate || plan.registrationDate || plan.enrolmentDate || plan.effectiveStartDate || '';
+    const matDate = plan.maturityDate || plan.expiryDate || plan.currentExpiryDate || (subDate ? calculateAnnualMaturityDate(subDate) : '');
+
     const effectivePlan: TurihamwePlan = {
       ...plan,
-      registrationDate: plan.registrationDate || plan.enrolmentDate || plan.effectiveStartDate,
-      expiryDate: plan.expiryDate || plan.currentExpiryDate,
-      currentExpiryDate: plan.expiryDate || plan.currentExpiryDate,
-      effectiveStartDate: plan.registrationDate || plan.effectiveStartDate || plan.enrolmentDate,
+      subscriptionDate: subDate,
+      maturityDate: matDate,
+      registrationDate: subDate,
+      effectiveStartDate: subDate,
+      expiryDate: matDate,
+      currentExpiryDate: matDate,
+      nextScheduledAlertDate: plan.nextScheduledAlertDate || matDate,
+      lastAlertStatus: plan.lastAlertStatus || 'SCHEDULED',
+      createdAt: plan.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     this.state.plans.unshift(effectivePlan);
     // Update member's status as well
@@ -1186,14 +1254,28 @@ class ServerStore {
     const idx = this.state.plans.findIndex(p => p.id === id);
     if (idx === -1) return undefined;
 
-    const mergedExpiry = updates.expiryDate || updates.currentExpiryDate;
-    const mergedRegDate = updates.registrationDate || updates.effectiveStartDate;
+    const existing = this.state.plans[idx];
+    const subDate = updates.subscriptionDate || updates.registrationDate || updates.effectiveStartDate || existing.subscriptionDate;
+    
+    // If subscriptionDate was explicitly updated and no explicit expiryDate was provided, recalculate maturityDate
+    let matDate = updates.maturityDate || updates.expiryDate || updates.currentExpiryDate;
+    if (!matDate && updates.subscriptionDate && updates.subscriptionDate !== existing.subscriptionDate) {
+      matDate = calculateAnnualMaturityDate(updates.subscriptionDate);
+    }
+    if (!matDate) {
+      matDate = existing.maturityDate || existing.currentExpiryDate;
+    }
 
     this.state.plans[idx] = {
-      ...this.state.plans[idx],
+      ...existing,
       ...updates,
-      ...(mergedExpiry ? { expiryDate: mergedExpiry, currentExpiryDate: mergedExpiry } : {}),
-      ...(mergedRegDate ? { registrationDate: mergedRegDate, effectiveStartDate: mergedRegDate } : {}),
+      subscriptionDate: subDate,
+      maturityDate: matDate,
+      registrationDate: subDate,
+      effectiveStartDate: subDate,
+      expiryDate: matDate,
+      currentExpiryDate: matDate,
+      nextScheduledAlertDate: updates.nextScheduledAlertDate || matDate,
       updatedAt: new Date().toISOString(),
     };
     if (updates.status) {
@@ -2686,7 +2768,15 @@ class ServerStore {
     clearedTestSms: number;
   } {
     const userCountBefore = this.state.users.length;
-    this.state.users = this.state.users.filter(u => !u.id.startsWith('usr-test-') && !/^u\d{4}$/.test(u.username));
+    this.state.users = this.state.users.filter(u => u.username.toLowerCase() !== 'itadm' && u.id !== 'usr-it-01' && !u.id.startsWith('usr-test-') && !/^u\d{4}$/.test(u.username));
+    if (!this.state.deletedUserUsernames?.includes('itadm')) {
+      this.state.deletedUserUsernames = this.state.deletedUserUsernames || [];
+      this.state.deletedUserUsernames.push('itadm');
+    }
+    if (!this.state.deletedUserIds?.includes('usr-it-01')) {
+      this.state.deletedUserIds = this.state.deletedUserIds || [];
+      this.state.deletedUserIds.push('usr-it-01');
+    }
     const clearedTestUsers = userCountBefore - this.state.users.length;
 
     const smsCountBefore = this.state.smsQueue.length;

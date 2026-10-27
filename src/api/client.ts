@@ -28,7 +28,23 @@ import {
   SmsProviderDiagnostics
 } from '../types';
 
-const API_BASE = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL || '/api';
+function resolveApiBase(): string {
+  const envVal = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL;
+  if (typeof envVal === 'string') {
+    const trimmed = envVal.trim();
+    // Absolute URL: http://... or https://...
+    if (/^https?:\/\//i.test(trimmed)) {
+      return trimmed.replace(/\/+$/, '');
+    }
+    // Relative path: must start with '/' and must not contain spaces or placeholder prose
+    if (trimmed.startsWith('/') && !trimmed.includes(' ') && trimmed.length < 50) {
+      return trimmed.replace(/\/+$/, '');
+    }
+  }
+  return '/api';
+}
+
+const API_BASE = resolveApiBase();
 
 class ApiClient {
   private token: string | null = null;
@@ -62,7 +78,27 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const base = resolveApiBase();
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+    let sanitizedUrl: string;
+    if (/^https?:\/\//i.test(base)) {
+      if (base.endsWith('/api') && cleanEndpoint.startsWith('/api/')) {
+        sanitizedUrl = `${base}${cleanEndpoint.slice(4)}`;
+      } else {
+        sanitizedUrl = `${base}${cleanEndpoint}`;
+      }
+    } else {
+      // Relative base (default '/api')
+      if (cleanEndpoint === base || cleanEndpoint.startsWith(`${base}/`)) {
+        sanitizedUrl = cleanEndpoint;
+      } else {
+        sanitizedUrl = `${base}${cleanEndpoint}`;
+      }
+      sanitizedUrl = sanitizedUrl.replace(/\/{2,}/g, '/');
+    }
+
+    const response = await fetch(sanitizedUrl, {
       ...options,
       headers,
     });
@@ -70,18 +106,18 @@ class ApiClient {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      if (response.status === 401 && endpoint !== '/auth/login') {
+      if (response.status === 401 && !endpoint.includes('login')) {
         this.setToken(null);
         if (typeof window !== 'undefined') {
           localStorage.removeItem('turihamwe_cached_user');
           localStorage.removeItem('turihamwe_cached_branch');
           localStorage.removeItem('turihamwe_cached_perms');
           window.dispatchEvent(new CustomEvent('turihamwe_session_expired', {
-            detail: { message: data.error || 'Session expired or invalid credentials' }
+            detail: { message: data.error || data.message || 'Session expired or invalid credentials' }
           }));
         }
       }
-      const errorMsg = data.message || data.error || `HTTP ${response.status}`;
+      const errorMsg = data.message || data.error || (response.status === 404 ? 'Service endpoint not found (HTTP 404)' : `HTTP ${response.status}`);
       throw new Error(errorMsg);
     }
 
@@ -90,22 +126,62 @@ class ApiClient {
 
   // --- Auth ---
   public async login(branchId: string, username: string, password: string): Promise<{ success: boolean; session: AuthSession }> {
-    const res = await this.request<{ success: boolean; session: AuthSession }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ branchId, username, password }),
-    });
+    const payload = JSON.stringify({ branchId, username, password });
 
-    if (res.session?.token) {
-      this.setToken(res.session.token);
+    // Primary route: /auth/login (resolves via resolveApiBase() to /api/auth/login)
+    try {
+      const res = await this.request<{ success: boolean; session: AuthSession }>('/auth/login', {
+        method: 'POST',
+        body: payload,
+      });
+
+      if (res.session?.token) {
+        this.setToken(res.session.token);
+      }
+      return res;
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // If 404 was encountered, fall back seamlessly to alternative endpoints
+      if (errMsg.includes('404')) {
+        try {
+          const fallbackRes = await this.request<{ success: boolean; session: AuthSession }>('/login', {
+            method: 'POST',
+            body: payload,
+          });
+          if (fallbackRes.session?.token) {
+            this.setToken(fallbackRes.session.token);
+          }
+          return fallbackRes;
+        } catch {
+          const apiRes = await this.request<{ success: boolean; session: AuthSession }>('/api/login', {
+            method: 'POST',
+            body: payload,
+          });
+          if (apiRes.session?.token) {
+            this.setToken(apiRes.session.token);
+          }
+          return apiRes;
+        }
+      }
+      throw err;
     }
-    return res;
   }
 
   public async verifyToken(): Promise<{ valid: boolean; session?: AuthSession }> {
     if (!this.token) return { valid: false };
-    return this.request<{ valid: boolean; session?: AuthSession }>('/auth/verify', {
-      method: 'POST',
-    });
+    try {
+      return await this.request<{ valid: boolean; session?: AuthSession }>('/auth/verify', {
+        method: 'POST',
+      });
+    } catch {
+      try {
+        return await this.request<{ valid: boolean; session?: AuthSession }>('/verify', {
+          method: 'POST',
+        });
+      } catch {
+        return { valid: false };
+      }
+    }
   }
 
   public async getUserBranches(username: string): Promise<{
@@ -115,7 +191,15 @@ class ApiClient {
     primaryBranchName?: string;
     allowedBranches: Branch[];
   }> {
-    return this.request(`/auth/user-branches?username=${encodeURIComponent(username)}`);
+    try {
+      return await this.request(`/auth/user-branches?username=${encodeURIComponent(username)}`);
+    } catch {
+      try {
+        return await this.request(`/user-branches?username=${encodeURIComponent(username)}`);
+      } catch {
+        return { found: false, hasMultiBranchAccess: false, allowedBranches: [] };
+      }
+    }
   }
 
   public async switchBranch(newBranchId: string): Promise<{ success: boolean; session: AuthSession }> {

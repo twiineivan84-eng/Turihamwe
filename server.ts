@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
@@ -25,7 +26,8 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = config.app.port;
+// Port 3000 is strictly required internally; Nginx proxies public port 8080 to localhost:3000
+const PORT = 3000;
 const isProd = config.app.isProduction;
 
 async function bootstrap() {
@@ -34,6 +36,14 @@ async function bootstrap() {
   // Basic middleware
   app.use(express.json({ limit: `${config.storage.maxUploadSizeMb}mb` }));
   app.use(express.urlencoded({ extended: true, limit: `${config.storage.maxUploadSizeMb}mb` }));
+
+  // Normalize consecutive slashes in request URLs to prevent Express routing 404s
+  app.use((req, _res, next) => {
+    if (req.url && req.url.includes('//')) {
+      req.url = req.url.replace(/\/{2,}/g, '/');
+    }
+    next();
+  });
 
   // CORS middleware (Requirement 12)
   app.use((req, res, next) => {
@@ -69,19 +79,49 @@ async function bootstrap() {
   // Start background Pandora SMS Queue Worker
   smsQueueWorker.start();
 
-  // Mount API endpoints
-  app.use('/api/auth', authRouter);
-  app.use('/api/branches', branchRouter);
-  app.use('/api/audit-logs', auditRouter);
-  app.use('/api/users', userRouter);
-  app.use('/api/sync', syncRouter);
-  app.use('/api/members', memberRouter);
-  app.use('/api/turihamwe', turihamweRouter);
-  app.use('/api/claims', claimRouter);
-  app.use('/api/sms', smsRouter);
-  app.use('/api/alerts', alertRouter);
-  app.use('/api/reports', reportRouter);
-  app.use('/api/system', systemRouter);
+  // Direct authentication endpoints for root and /api shortcuts to prevent any 404s
+  app.all(['/login', '/api/login'], (req, res, next) => {
+    req.url = '/login' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+    authRouter(req, res, next);
+  });
+  app.all(['/verify', '/api/verify'], (req, res, next) => {
+    req.url = '/verify' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+    authRouter(req, res, next);
+  });
+  app.all(['/user-branches', '/api/user-branches'], (req, res, next) => {
+    req.url = '/user-branches' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+    authRouter(req, res, next);
+  });
+  app.all(['/switch-branch', '/api/switch-branch'], (req, res, next) => {
+    req.url = '/switch-branch' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+    authRouter(req, res, next);
+  });
+  app.all(['/logout', '/api/logout'], (req, res, next) => {
+    req.url = '/logout' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+    authRouter(req, res, next);
+  });
+  app.all(['/setup-status', '/api/setup-status'], (req, res, next) => {
+    req.url = '/setup-status' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+    authRouter(req, res, next);
+  });
+  app.all(['/setup-admin', '/api/setup-admin'], (req, res, next) => {
+    req.url = '/setup-admin' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+    authRouter(req, res, next);
+  });
+
+  // Mount API endpoints (Support both /api/* and root /* paths to prevent 404s)
+  app.use(['/api/auth', '/auth'], authRouter);
+  app.use(['/api/branches', '/branches'], branchRouter);
+  app.use(['/api/audit-logs', '/audit-logs'], auditRouter);
+  app.use(['/api/users', '/users'], userRouter);
+  app.use(['/api/sync', '/sync'], syncRouter);
+  app.use(['/api/members', '/members'], memberRouter);
+  app.use(['/api/turihamwe', '/turihamwe'], turihamweRouter);
+  app.use(['/api/claims', '/claims'], claimRouter);
+  app.use(['/api/sms', '/sms'], smsRouter);
+  app.use(['/api/alerts', '/alerts'], alertRouter);
+  app.use(['/api/reports', '/reports'], reportRouter);
+  app.use(['/api/system', '/system'], systemRouter);
 
   // Production Health Check & Monitoring (Requirement 7 & 15)
   app.get(['/health', '/api/health'], (_req, res) => {
@@ -139,9 +179,16 @@ async function bootstrap() {
     });
   });
 
+  // Explicit API 404 handler: prevents unmatched API routes from falling through to the SPA HTML handler
+  app.all(['/api', '/api/*'], (_req, res) => {
+    res.status(404).json({ success: false, message: 'Requested API endpoint not found (HTTP 404).' });
+  });
+
   // Frontend integration
-  if (isProd) {
-    const distPath = path.resolve(__dirname, 'dist');
+  const distPath = path.resolve(__dirname, 'dist');
+  const hasDist = fs.existsSync(distPath) && fs.existsSync(path.resolve(distPath, 'index.html'));
+
+  if (isProd && hasDist) {
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(distPath, 'index.html'));

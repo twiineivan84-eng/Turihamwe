@@ -192,6 +192,16 @@ export class SmsService {
       sms.updatedAt = new Date().toISOString();
       serverStore.updateSmsMessage(sms);
 
+      // Update plan alert telemetry
+      if (sms.planId) {
+        const linkedPlan = serverStore.getPlanById(sms.planId);
+        if (linkedPlan) {
+          linkedPlan.lastAlertStatus = 'SENT';
+          linkedPlan.lastAlertSentAt = new Date().toISOString();
+          serverStore.updatePlan(linkedPlan.id, linkedPlan);
+        }
+      }
+
       serverStore.recordSmsTelemetry({
         lastSuccessTime: new Date().toISOString(),
         lastSubmissionTime: new Date().toISOString(),
@@ -254,6 +264,14 @@ export class SmsService {
         });
       }
 
+      if (sms.planId) {
+        const linkedPlan = serverStore.getPlanById(sms.planId);
+        if (linkedPlan) {
+          linkedPlan.lastAlertStatus = 'FAILED';
+          serverStore.updatePlan(linkedPlan.id, linkedPlan);
+        }
+      }
+
       sms.lockedAt = undefined;
       sms.lockedBy = undefined;
       sms.updatedAt = new Date().toISOString();
@@ -283,6 +301,35 @@ export class SmsService {
   }
 
   /**
+   * Cancel or update any pending scheduled alerts associated with an old subscription or maturity date
+   */
+  public static cancelScheduledAlertForPlan(planId: string, oldMaturityDate?: string): number {
+    let cancelledCount = 0;
+    const messages = serverStore.getSmsMessages();
+    for (const m of messages) {
+      if (m.planId === planId && (m.status === 'PENDING' || m.status === 'SENDING')) {
+        if (!oldMaturityDate || (m.eventReferenceKey && m.eventReferenceKey.includes(oldMaturityDate))) {
+          m.status = 'FAILED';
+          m.failureReason = `Cancelled: Subscription/maturity date changed for plan ${planId}`;
+          m.updatedAt = new Date().toISOString();
+          serverStore.updateSmsMessage(m);
+          cancelledCount++;
+        }
+      }
+    }
+
+    const events = serverStore.getNotificationEvents();
+    for (const e of events) {
+      if (e.planId === planId && (!oldMaturityDate || (e.deduplicationKey && e.deduplicationKey.includes(oldMaturityDate)))) {
+        e.description = `[SUPERSEDED] ${e.description}`;
+        serverStore.updateNotificationEvent(e);
+      }
+    }
+
+    return cancelledCount;
+  }
+
+  /**
    * Process all pending messages in queue via worker
    */
   public static async processQueue(): Promise<{ processed: number; sent: number; failed: number }> {
@@ -296,10 +343,10 @@ export class SmsService {
 
   /**
    * Automatically detect and queue plan expiry notification events.
-   * - Requirement 1: Africa/Kampala timezone (UTC+3), automatic scheduling,
-   *   recovers overdue unsent reminders after downtime, durable idempotency.
-   * - Requirement 2: Exact approved wording:
-   *   "NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba"
+   * Requirement 1D & 5: Trigger strictly on the actual plan maturity date (subject to approved policy).
+   * Arbitrary advance intervals (30d, 14d, 7d spam) are suppressed per institutional business rules.
+   * Exact approved wording in Runyankore:
+   * "NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba"
    */
   public static evaluateExpiryNotificationEvents(options?: { simulatedDate?: Date | string }): { eventsCreated: number; messagesQueued: number } {
     const plans = serverStore.getPlans().filter(p => p.status === 'ACTIVE' || p.status === 'EXPIRED');
@@ -309,41 +356,28 @@ export class SmsService {
     let messagesQueued = 0;
 
     for (const plan of plans) {
-      if (!plan.currentExpiryDate) continue;
+      const targetMaturityDate = plan.maturityDate || plan.currentExpiryDate;
+      if (!targetMaturityDate) continue;
 
       // Exact Uganda calendar day difference (Africa/Kampala, UTC+3)
-      const diffDays = diffInUgandaCalendarDays(plan.currentExpiryDate, now);
+      const diffDays = diffInUgandaCalendarDays(targetMaturityDate, now);
 
       let eventType: string | null = null;
       let templateCategory: any = null;
-      let isExpiryNotice = false;
 
       if (diffDays === 0) {
-        // Plan expires today in Uganda
+        // Plan reaches maturity today in Uganda
         eventType = 'EXPIRY_DUE_TODAY';
         templateCategory = 'EXPIRY_DATE_NOTICE';
-        isExpiryNotice = true;
       } else if (diffDays < 0 && diffDays >= -7) {
-        // Missed reminder / offline recovery: plan reached expiry during downtime and was not reminded
+        // Downtime recovery: plan reached maturity during downtime and was not reminded
         eventType = 'EXPIRY_OVERDUE_RECOVERY';
         templateCategory = 'EXPIRY_DATE_NOTICE';
-        isExpiryNotice = true;
-      } else if (diffDays === 30 && plan.status === 'ACTIVE') {
-        eventType = 'EXPIRY_30_DAYS';
-        templateCategory = 'EXPIRY_REMINDER_30_DAYS';
-      } else if (diffDays === 14 && plan.status === 'ACTIVE') {
-        eventType = 'EXPIRY_14_DAYS';
-        templateCategory = 'EXPIRY_REMINDER_14_DAYS';
-      } else if (diffDays === 7 && plan.status === 'ACTIVE') {
-        eventType = 'EXPIRY_7_DAYS';
-        templateCategory = 'EXPIRY_REMINDER_7_DAYS';
       }
 
       if (eventType && templateCategory) {
-        // Durable idempotency: Unique event identity based on plan ID and its recorded expiry date
-        const deduplicationKey = isExpiryNotice
-          ? `PLAN_EXPIRY_AUTO::${plan.id}::${plan.currentExpiryDate}`
-          : `${eventType}::${plan.id}::${todayUganda}`;
+        // Durable idempotency: Unique event identity based on plan ID and its recorded maturity date
+        const deduplicationKey = `PLAN_EXPIRY_AUTO::${plan.id}::${targetMaturityDate}`;
 
         const existingEvent = serverStore.getNotificationEvents().find(e => e.deduplicationKey === deduplicationKey);
         const existingSms = serverStore.getSmsMessages().find(
@@ -363,9 +397,7 @@ export class SmsService {
               planId: plan.id,
               branchId: plan.registeredBranchId,
               branchName: plan.registeredBranchName || 'Nyamuyanja Branch',
-              description: isExpiryNotice
-                ? `Automated expiry notification on plan ${plan.planCode || plan.id} reaching expiry date ${plan.currentExpiryDate}`
-                : `Automated advance notification (${diffDays} days remaining) for policy ${plan.planCode || plan.id}`,
+              description: `Automated maturity notification on plan ${plan.planCode || plan.id} reaching maturity date ${targetMaturityDate}`,
               processed: true,
               processedAt: new Date().toISOString(),
               createdAt: new Date().toISOString(),
@@ -374,25 +406,8 @@ export class SmsService {
             serverStore.addNotificationEvent(newEvent);
             eventsCreated++;
 
-            let messageContent = '';
-            if (isExpiryNotice) {
-              // EXACT approved text (Requirement 2) - strictly preserved without alteration
-              messageContent = APPROVED_EXPIRY_SMS_TEXT;
-            } else {
-              const template = serverStore.getSmsTemplates().find(t => t.category === templateCategory && t.isActive) ||
-                serverStore.getSmsTemplates().find(t => t.category === 'EXPIRY_REMINDER_30_DAYS' && t.isActive);
-
-              const defaultText = `Dear [Member Name], your Turihamwe cover with Nyamuyanja SACCO expires on [Expiry Date]. Please renew at [Branch] before the expiry date to maintain your funeral coverage benefits.`;
-              const templateText = template?.templateText || defaultText;
-
-              messageContent = this.interpolateTemplate(templateText, {
-                'Member Name': member.fullName,
-                'Expiry Date': plan.currentExpiryDate,
-                'Branch': plan.registeredBranchName || 'Nyamuyanja Branch',
-                'Policy Code': plan.planCode || plan.id,
-                'Account Number': member.saccoAccountNumber,
-              });
-            }
+            // EXACT approved text (Requirement 2 & 5) - strictly preserved without alteration
+            const messageContent = APPROVED_EXPIRY_SMS_TEXT;
 
             const queueResult = this.queueMessage({
               recipientPhone: member.primaryPhone,
@@ -413,6 +428,12 @@ export class SmsService {
               newEvent.smsMessageId = queueResult.message.id;
               serverStore.updateNotificationEvent(newEvent);
               messagesQueued++;
+
+              // Update plan alert tracking
+              plan.lastAlertStatus = 'QUEUED';
+              plan.lastAlertSentAt = new Date().toISOString();
+              plan.nextScheduledAlertDate = targetMaturityDate;
+              serverStore.updatePlan(plan.id, plan);
             }
           }
         }

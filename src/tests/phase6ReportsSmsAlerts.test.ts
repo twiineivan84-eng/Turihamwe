@@ -203,7 +203,7 @@ export class Phase6TestRunner {
         branchName: 'Nyamuyanja Branch',
         messageText: 'Dear Member, your policy expires in 14 days.',
         maxRetries: 3,
-        provider: 'AFRICAS_TALKING',
+        provider: 'PANDORA',
         queuedByUserId: 'usr-01',
         queuedByUserFullName: 'Admin',
         createdAt: new Date().toISOString(),
@@ -212,9 +212,9 @@ export class Phase6TestRunner {
 
       const initialPending = queued.status === 'PENDING';
 
-      // Simulate transmission via Africa's Talking
+      // Simulate transmission via Pandora Networks
       queued.status = 'SENT';
-      queued.providerMessageId = 'ATXid_98234190';
+      queued.providerMessageId = 'PANDORA_MSG_98234190';
       queued.sentAt = new Date().toISOString();
 
       const passed = initialPending && queued.status === 'SENT' && Boolean(queued.providerMessageId);
@@ -224,7 +224,7 @@ export class Phase6TestRunner {
         name: 'SMS Notification Queue Lifecycle',
         passed,
         message: passed
-          ? 'SMS correctly enters PENDING queue and transitions to SENT with Africa\'s Talking delivery metadata'
+          ? 'SMS correctly enters PENDING queue and transitions to SENT with Pandora Networks delivery metadata'
           : 'SMS queue lifecycle state failure',
       });
     } catch (err: any) {

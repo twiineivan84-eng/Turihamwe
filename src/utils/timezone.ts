@@ -260,3 +260,36 @@ export function detectClockDrift(
       : undefined,
   };
 }
+
+/**
+ * Calculates the annual maturity date exactly 1 year from the recorded subscription date.
+ * 
+ * Calendar Rules (Agreed Turihamwe Policy):
+ * - Standard anniversary: same day-of-month and month in the next calendar year (e.g., 2026-03-15 -> 2027-03-15).
+ * - Leap day rule: If the subscription date is Feb 29 in a leap year, the maturity date in a non-leap year falls on Feb 28.
+ * - Month-end rule: The day is clamped to the maximum days in the target anniversary month.
+ * - Always returns an ISO YYYY-MM-DD date-only string in the Africa/Kampala context.
+ */
+export function calculateAnnualMaturityDate(subscriptionDateStr: string): string {
+  if (!subscriptionDateStr || typeof subscriptionDateStr !== 'string') return '';
+  const clean = subscriptionDateStr.trim().substring(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return '';
+
+  const [yearStr, monthStr, dayStr] = clean.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const day = parseInt(dayStr, 10);
+
+  if (isNaN(year) || isNaN(month) || isNaN(day) || month < 1 || month > 12 || day < 1 || day > 31) {
+    return '';
+  }
+
+  const targetYear = year + 1;
+  const targetMonth = month;
+
+  // Day 0 of the following month gives the last valid day of targetMonth
+  const maxDaysInTargetMonth = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
+  const targetDay = Math.min(day, maxDaysInTargetMonth);
+
+  return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+}

@@ -18,7 +18,7 @@ import { Phase9ProductionTestRunner } from './phase9ProductionReadiness.test';
 import { MemberAdminPermissionsTestRunner } from './memberAdminPermissions.test';
 import { runRecordPropagationTests } from './recordPropagationAcrossSystem.test';
 import { runLiveAudit } from './liveAuditSuite';
-import { runAfricasTalkingSuite } from './africasTalkingDeliveryPipeline.test';
+import { runSmsExclusivityAndPandoraSuite } from './smsExclusivityAndPandoraPipeline.test';
 import { runMasterVerificationSuite } from './masterImplementationVerification.test';
 import { serverStore } from '../server/storage/serverStore';
 
@@ -184,17 +184,17 @@ async function main() {
   }
   console.log('');
 
-  // 9. Africa's Talking SMS Delivery Pipeline Verification Suite
+  // 9. Pandora SMS Exclusivity & Delivery Pipeline Verification Suite
   try {
-    const atResult = await runAfricasTalkingSuite();
-    grandTotal += atResult.results.length;
-    grandPassed += atResult.results.filter(r => r.passed).length;
-    grandFailed += atResult.results.filter(r => !r.passed).length;
-    if (!atResult.passed) {
+    const pandoraResult = await runSmsExclusivityAndPandoraSuite();
+    grandTotal += pandoraResult.results.length;
+    grandPassed += pandoraResult.results.filter(r => r.passed).length;
+    grandFailed += pandoraResult.results.filter(r => !r.passed).length;
+    if (!pandoraResult.passed) {
       hasAnyFailure = true;
     }
   } catch (err: any) {
-    console.error("Africa's Talking suite execution error:", err.message);
+    console.error('Pandora SMS suite execution error:', err.message);
     hasAnyFailure = true;
   }
   console.log('');

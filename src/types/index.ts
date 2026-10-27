@@ -330,6 +330,15 @@ export interface TurihamwePlan {
   enrolmentDate: string;
   effectiveStartDate: string;
   currentExpiryDate: string;
+  // Core Business Rules & Subscription Fields
+  subscriptionDate: string; // Authoritative recorded subscription date (YYYY-MM-DD)
+  maturityDate?: string; // Calculated annual maturity date (1-year anniversary of subscriptionDate)
+  nextScheduledAlertDate?: string; // Actual maturity date on which the official reminder is scheduled
+  lastAlertStatus?: string; // 'SCHEDULED' | 'QUEUED' | 'SENT' | 'FAILED' | 'NONE'
+  lastAlertSentAt?: string;
+  lastContributionAmount?: number;
+  requiresReview?: boolean;
+  reviewReason?: string;
   // Record-Keeping Enhancement fields (Part A)
   registrationType?: TurihamweRegistrationType;
   registrationDate?: string; // Manually editable historical date
@@ -345,7 +354,7 @@ export interface TurihamwePlan {
   totalContributionsAmount?: number;
   lastContributionDate?: string;
   notes?: string;
-  createdAt: string;
+  createdAt: string; // Record-entry timestamp (stored separately from subscriptionDate)
   updatedAt: string;
 }
 
@@ -378,15 +387,16 @@ export interface Contribution {
   receivedByUsername?: string;
   amount: number; // Configurable / unprescribed amount
   paymentMethod: 'CASH' | 'SACCO_TRANSFER' | 'MOBILE_MONEY' | 'BANK_DRAFT';
-  contributionDate: string;
+  contributionDate: string; // Actual transaction date
   status: ContributionStatus;
   periodCoveredStart?: string;
   periodCoveredEnd?: string;
+  externalTransactionRef?: string; // Banking system transaction reference (for duplicate checking)
   remarks?: string;
   correctionReason?: string;
   correctedByUserId?: string;
   correctedAt?: string;
-  createdAt: string;
+  createdAt: string; // System record-entry timestamp (distinct from contributionDate)
   updatedAt: string;
   isSynced?: boolean;
 }
@@ -466,16 +476,33 @@ export interface PlanReactivationLog {
  */
 export interface BusinessRulesConfig {
   contributionAmount: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL';
+    status: 'ACTIVE_POLICY';
     defaultAmount: number | null;
     isConfigurable: true;
     notes: string;
   };
   contributionFrequency: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL';
+    status: 'ACTIVE_POLICY';
     allowedFrequencies: string[];
-    defaultFrequency: string | null;
+    defaultFrequency: 'ANNUAL';
     isConfigurable: true;
+    notes: string;
+  };
+  planDuration: {
+    status: 'ACTIVE_POLICY';
+    durationYears: number;
+    notes: string;
+  };
+  alertSchedule: {
+    status: 'ACTIVE_POLICY';
+    triggerEvent: 'EXACT_MATURITY_DATE';
+    advanceRemindersEnabled: false;
+    notes: string;
+  };
+  financialPenalties: {
+    status: 'STRICTLY_PROHIBITED';
+    automaticLateFees: false;
+    automaticDeductions: false;
     notes: string;
   };
   gracePeriodDays: {
@@ -485,13 +512,13 @@ export interface BusinessRulesConfig {
     notes: string;
   };
   renewalCoverPeriodMonths: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL';
-    defaultMonths: number | null;
+    status: 'ACTIVE_POLICY';
+    defaultMonths: 12;
     isConfigurable: true;
     notes: string;
   };
   reactivationEligibility: {
-    status: 'PENDING_EXECUTIVE_POLICY';
+    status: 'CONTROLLED_WORKFLOW';
     requiresBoardApproval: boolean;
     isConfigurable: true;
     notes: string;

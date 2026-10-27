@@ -29,7 +29,20 @@ function disableHmrClientPlugin(): Plugin {
 export default defineConfig(() => {
   const isHmrDisabled = process.env.DISABLE_HMR === 'true';
 
+  // Sanitize VITE_API_BASE_URL to prevent commentary/placeholder strings in environment from breaking client requests
+  const envApiBase = process.env.VITE_API_BASE_URL;
+  const validApiBase =
+    envApiBase &&
+    (envApiBase.startsWith('/') || /^https?:\/\//i.test(envApiBase)) &&
+    !envApiBase.includes(' ') &&
+    envApiBase.length < 60
+      ? envApiBase
+      : '/api';
+
   return {
+    define: {
+      'import.meta.env.VITE_API_BASE_URL': JSON.stringify(validApiBase),
+    },
     plugins: [
       react(),
       tailwindcss(),

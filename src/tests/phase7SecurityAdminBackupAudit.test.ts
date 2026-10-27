@@ -818,7 +818,7 @@ export class Phase7TestRunner {
         rolesRemaining >= 6 &&
         templatesRemaining >= 9 &&
         settings['deployment.ready'] === 'true' &&
-        (settings['sms.provider'] === 'PANDORA' || settings['sms.provider'] === 'AFRICAS_TALKING') &&
+        settings['sms.provider'] === 'PANDORA' &&
         ivanExists &&
         (!serverStore.isUserDeleted('itadm') ? itadmExists : true) &&
         membersCount === 0 &&

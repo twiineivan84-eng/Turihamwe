@@ -4,13 +4,15 @@ import { TurihamwePlan, SaccoMember, Contribution } from '../../types';
 import { LocalRepository } from '../../db/local/localRepository';
 import { localDb } from '../../db/local/sqliteEngine';
 import { notifyRecordChanged } from '../../utils/systemEvents';
-import { ShieldCheck, X, AlertCircle, DollarSign, Calendar, CreditCard, User, FileText, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, X, AlertCircle, DollarSign, Calendar, CreditCard, User, FileText, CheckCircle2, Info, Hash } from 'lucide-react';
 
 interface RecordContributionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (contribution: Contribution) => void;
   preselectedPlan?: TurihamwePlan | null;
+  preselectedMember?: SaccoMember | null;
+  onOpenRegisterPlan?: (member: SaccoMember) => void;
 }
 
 export const RecordContributionModal: React.FC<RecordContributionModalProps> = ({
@@ -18,6 +20,8 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
   onClose,
   onSuccess,
   preselectedPlan,
+  preselectedMember,
+  onOpenRegisterPlan,
 }) => {
   const { user, workingBranch, hasPermission } = useAuth();
 
@@ -29,8 +33,7 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
   const [contributionDate, setContributionDate] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
-  const [periodCoveredStart, setPeriodCoveredStart] = useState<string>('');
-  const [periodCoveredEnd, setPeriodCoveredEnd] = useState<string>('');
+  const [externalTransactionRef, setExternalTransactionRef] = useState<string>('');
   const [remarks, setRemarks] = useState('');
 
   const [searching, setSearching] = useState(false);
@@ -40,17 +43,20 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
 
   const canRecord = hasPermission('turihamwe.record_contribution') || hasPermission('transactions.record');
 
-  // Load preselected plan if provided
+  // Load preselected plan or member if provided
   useEffect(() => {
     if (preselectedPlan) {
       setPlan(preselectedPlan);
       setSaccoAccountNumber(preselectedPlan.saccoAccountNumber);
-      // Fetch member
       fetchMemberAndPlan(preselectedPlan.saccoAccountNumber);
-    } else {
+    } else if (preselectedMember) {
+      setMember(preselectedMember);
+      setSaccoAccountNumber(preselectedMember.saccoAccountNumber);
+      fetchMemberAndPlan(preselectedMember.saccoAccountNumber);
+    } else if (isOpen) {
       resetForm();
     }
-  }, [preselectedPlan, isOpen]);
+  }, [preselectedPlan, preselectedMember, isOpen]);
 
   const resetForm = () => {
     setSaccoAccountNumber('');
@@ -59,8 +65,7 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
     setAmount('');
     setPaymentMethod('CASH');
     setContributionDate(new Date().toISOString().split('T')[0]);
-    setPeriodCoveredStart('');
-    setPeriodCoveredEnd('');
+    setExternalTransactionRef('');
     setRemarks('');
     setMemberError(null);
     setSubmitError(null);
@@ -135,15 +140,10 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
 
       if (!foundPlan) {
         setPlan(null);
-        setMemberError(`Member ${cleanAcc} is verified, but has no registered Turihamwe insurance plan. A plan must be enrolled before recording contributions.`);
+        setMemberError(`Member ${cleanAcc} is verified, but has no registered Turihamwe insurance plan. Please enrol the plan first.`);
       } else {
         setPlan(foundPlan);
         setMemberError(null);
-        // Pre-fill suggested period if applicable
-        if (foundPlan.effectiveStartDate && foundPlan.currentExpiryDate) {
-          setPeriodCoveredStart(foundPlan.effectiveStartDate);
-          setPeriodCoveredEnd(foundPlan.currentExpiryDate);
-        }
       }
     } catch (err: unknown) {
       setMemberError(err instanceof Error ? err.message : 'Error validating member.');
@@ -173,13 +173,18 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
     }
 
     if (!plan) {
-      setSubmitError('This member does not have an active Turihamwe plan to credit.');
+      setSubmitError('This member does not have a registered Turihamwe plan to credit.');
       return;
     }
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      setSubmitError('Please enter a valid contribution amount in UGX.');
+      setSubmitError('Contribution amount must be a positive monetary value in UGX.');
+      return;
+    }
+
+    if (!contributionDate || !/^\d{4}-\d{2}-\d{2}$/.test(contributionDate)) {
+      setSubmitError('Please enter a valid payment transaction date (YYYY-MM-DD).');
       return;
     }
 
@@ -192,8 +197,7 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
         amount: numAmount,
         paymentMethod,
         contributionDate,
-        periodCoveredStart: periodCoveredStart || undefined,
-        periodCoveredEnd: periodCoveredEnd || undefined,
+        externalTransactionRef: externalTransactionRef.trim() || undefined,
         remarks: remarks.trim() || undefined,
       };
 
@@ -237,8 +241,7 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
             amount: numAmount,
             paymentMethod,
             contributionDate,
-            periodCoveredStart,
-            periodCoveredEnd,
+            externalTransactionRef: externalTransactionRef.trim() || undefined,
             remarks: remarks.trim(),
           });
         } else {
@@ -254,6 +257,7 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
           if (localPlan) {
             localPlan.totalContributionsAmount = (localPlan.totalContributionsAmount || 0) + createdContribution.amount;
             localPlan.lastContributionDate = createdContribution.contributionDate;
+            localPlan.lastContributionAmount = createdContribution.amount;
             localPlan.updatedAt = new Date().toISOString();
             await localDb.plans.put(localPlan);
           }
@@ -271,9 +275,12 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
 
   if (!isOpen) return null;
 
+  const subscriptionDateDisplay = plan?.subscriptionDate || plan?.enrolmentDate || plan?.effectiveStartDate || '—';
+  const maturityDateDisplay = plan?.maturityDate || plan?.currentExpiryDate || plan?.expiryDate || '—';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-6">
         {/* Top Header */}
         <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -295,11 +302,11 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
           </button>
         </div>
 
-        {/* Notice regarding uninvented business rules */}
+        {/* Business Rule Notice */}
         <div className="px-6 py-2.5 bg-blue-50 border-b border-blue-200 text-[11px] text-blue-900 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-blue-700 shrink-0" />
+          <Info className="w-4 h-4 text-blue-700 shrink-0" />
           <span>
-            <strong>Configurable Parameter Note:</strong> Contribution amounts remain unprescribed pending SACCO board specification. Enter the actual amount received.
+            <strong>Policy Rule:</strong> Recording a contribution documents funds received. It does not alter the member's subscription date or annual maturity date. Term extensions are recorded through the Renewal workflow.
           </span>
         </div>
 
@@ -341,37 +348,63 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
             )}
           </div>
 
-          {/* Member & Plan Verification Card */}
+          {/* Member & Plan Verification Card displaying Required Details */}
           {member && (
-            <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-1.5">
-              <div className="flex justify-between items-center">
-                <span className="font-semibold text-slate-900">{member.fullName}</span>
-                <span className="text-[10px] font-mono bg-blue-100 text-blue-900 px-2 py-0.5 rounded font-bold">
+            <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-2">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="font-bold text-slate-900 text-sm block">{member.fullName}</span>
+                  <span className="text-[11px] text-slate-500">Phone: {member.primaryPhone} • Branch: {member.branchName || workingBranch?.name}</span>
+                </div>
+                <span className="text-xs font-mono bg-blue-100 text-blue-900 px-2.5 py-1 rounded font-bold">
                   {member.saccoAccountNumber}
                 </span>
               </div>
-              <div className="text-[11px] text-slate-600 flex items-center justify-between">
-                <span>Branch: {member.branchName || 'SACCO Branch'}</span>
-                <span>Phone: {member.primaryPhone}</span>
-              </div>
 
               {plan ? (
-                <div className="mt-2 pt-2 border-t border-slate-200 flex items-center justify-between text-[11px]">
+                <div className="pt-2 border-t border-slate-200 grid grid-cols-2 gap-2 text-[11px]">
                   <div>
-                    <span className="text-slate-500">Linked Plan: </span>
-                    <span className="font-mono font-bold text-blue-900">{plan.id}</span>
+                    <span className="text-slate-500 font-medium">Plan Reference:</span>
+                    <div className="font-mono font-bold text-blue-900">{plan.id}</div>
                   </div>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    plan.status === 'ACTIVE'
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-amber-100 text-amber-800'
-                  }`}>
-                    {plan.status}
-                  </span>
+                  <div>
+                    <span className="text-slate-500 font-medium">Plan Status:</span>
+                    <div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        plan.status === 'ACTIVE'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : plan.status === 'EXPIRED'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {plan.status}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 font-medium">Subscription Date:</span>
+                    <div className="font-mono font-semibold text-slate-800">{subscriptionDateDisplay}</div>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 font-medium">Annual Maturity Date:</span>
+                    <div className="font-mono font-bold text-emerald-800">{maturityDateDisplay}</div>
+                  </div>
                 </div>
               ) : (
-                <div className="mt-2 pt-2 border-t border-red-200 text-[11px] text-red-700 font-semibold">
-                  No active Turihamwe plan registered for this member.
+                <div className="pt-2 border-t border-amber-200 text-[11px] text-amber-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span>No Turihamwe plan registered for this member yet.</span>
+                  {onOpenRegisterPlan && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenRegisterPlan(member);
+                      }}
+                      className="px-2.5 py-1 bg-blue-700 hover:bg-blue-800 text-white rounded font-bold text-[10px] transition shadow-xs whitespace-nowrap self-start sm:self-auto"
+                    >
+                      + Enrol Plan &rarr;
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -396,6 +429,7 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
                   required
                 />
               </div>
+              <p className="text-[10px] text-slate-400 mt-1">Validated positive monetary value</p>
             </div>
 
             <div>
@@ -416,43 +450,37 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
             </div>
           </div>
 
-          {/* Transaction Date */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Contribution Date *
-            </label>
-            <input
-              type="date"
-              value={contributionDate}
-              onChange={e => setContributionDate(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:bg-white"
-              required
-            />
-          </div>
-
-          {/* Coverage Period (Optional) */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Actual Transaction Date & Optional External Reference */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                Cover Start (Optional)
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Actual Transaction Date *
               </label>
               <input
                 type="date"
-                value={periodCoveredStart}
-                onChange={e => setPeriodCoveredStart(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600"
+                value={contributionDate}
+                onChange={e => setContributionDate(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:bg-white"
+                required
               />
+              <p className="text-[10px] text-slate-400 mt-1">Payment date (separate from system entry timestamp)</p>
             </div>
+
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                Cover End (Optional)
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                External Transaction Ref (Optional)
               </label>
-              <input
-                type="date"
-                value={periodCoveredEnd}
-                onChange={e => setPeriodCoveredEnd(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600"
-              />
+              <div className="relative">
+                <Hash className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={externalTransactionRef}
+                  onChange={e => setExternalTransactionRef(e.target.value.toUpperCase())}
+                  placeholder="e.g. MM-7849103 or CHQ-0045"
+                  className="w-full pl-9 pr-3 py-2 text-xs font-mono uppercase bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:bg-white"
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">Checked for duplicates across ledger</p>
             </div>
           </div>
 
@@ -465,7 +493,7 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
               rows={2}
               value={remarks}
               onChange={e => setRemarks(e.target.value)}
-              placeholder="e.g. Annual policy contribution payment received at teller counter"
+              placeholder="e.g. Annual contribution deposit received at teller counter"
               className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600 focus:bg-white"
             />
           </div>
@@ -485,7 +513,7 @@ export const RecordContributionModal: React.FC<RecordContributionModalProps> = (
               className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition disabled:opacity-50"
             >
               <CheckCircle2 className="w-4 h-4" />
-              {submitting ? 'Recording...' : 'Record & Generate Receipt'}
+              {submitting ? 'Recording...' : 'Record Contribution & Receipt'}
             </button>
           </div>
         </form>

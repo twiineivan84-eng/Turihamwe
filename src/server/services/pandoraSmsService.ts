@@ -263,7 +263,12 @@ export class PandoraSmsService {
     }
 
     const creds = this.getCredentials();
-    const url = new URL(creds.balanceUrl);
+    let url: URL;
+    try {
+      url = new URL(creds.balanceUrl);
+    } catch {
+      url = new URL(this.DEFAULT_BALANCE_URL);
+    }
     url.searchParams.set('username', creds.phoneNumber);
     url.searchParams.set('phone_number', creds.phoneNumber);
     url.searchParams.set('password', creds.password);

@@ -226,9 +226,9 @@ export class SeedService {
 
     const isDeploymentReady = serverStore.getSystemSettings()['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true';
 
-    // Only seed dev users if the system is NOT marked deployment-ready AND user accounts have not already been initialized.
+    // Only seed dev users if the system is NOT marked deployment-ready.
     // Crucially: NEVER re-seed any account that was explicitly deleted by an administrator.
-    if (!isDeploymentReady && serverStore.getUsers().length <= 1) {
+    if (!isDeploymentReady) {
       for (const u of devSeedUsers) {
         if (
           u.username !== 'ivan' &&
