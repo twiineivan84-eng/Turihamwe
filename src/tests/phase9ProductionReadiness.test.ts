@@ -90,6 +90,76 @@ export class Phase9ProductionTestRunner {
       results.push({ id: 1, step: 'LOGIN', name: 'Authentication', passed: false, message: e.message });
     }
 
+    // Ensure test fixture members exist for lifecycle testing
+    if (!serverStore.getMemberByAccountNumber('NYA-001042')) {
+      serverStore.addMember({
+        saccoAccountNumber: 'NYA-001042',
+        fullName: 'Kato Emmanuel',
+        gender: 'MALE',
+        dateOfBirth: '1985-04-12',
+        nationalIdNumber: 'CM85012345XYZ',
+        primaryPhone: '+256772112233',
+        district: 'Isingiro',
+        subCounty: 'Nyamuyanja',
+        parish: 'Central',
+        village: 'Katooma',
+        occupation: 'Farmer',
+        monthlyIncomeUgx: 450000,
+        nextOfKinName: 'Kato Sarah',
+        nextOfKinRelationship: 'Spouse',
+        nextOfKinPhone: '+256772998877',
+        branchId: hqBranch.id,
+        registeredByStaffId: 'usr-it-ivan',
+        registrationDate: new Date().toISOString(),
+        status: 'ACTIVE',
+        clientStatus: 'ALIVE',
+      });
+    }
+    if (!serverStore.getMemberByAccountNumber('NYA-002015')) {
+      serverStore.addMember({
+        saccoAccountNumber: 'NYA-002015',
+        fullName: 'Mugisha David',
+        gender: 'MALE',
+        dateOfBirth: '1990-08-22',
+        nationalIdNumber: 'CM90098765ABC',
+        primaryPhone: '+256773223344',
+        district: 'Isingiro',
+        subCounty: 'Nyamuyanja',
+        parish: 'North',
+        village: 'Nyakabingo',
+        occupation: 'Trader',
+        monthlyIncomeUgx: 800000,
+        nextOfKinName: 'Mugisha Grace',
+        nextOfKinRelationship: 'Sister',
+        nextOfKinPhone: '+256773887766',
+        branchId: hqBranch.id,
+        registeredByStaffId: 'usr-it-ivan',
+        registrationDate: new Date().toISOString(),
+        status: 'ACTIVE',
+        clientStatus: 'ALIVE',
+      });
+    }
+    if (serverStore.getPlans().length === 0) {
+      serverStore.addPlan({
+        id: 'PLN-NYA-001042',
+        saccoAccountNumber: 'NYA-001042',
+        memberName: 'Kato Emmanuel',
+        planCode: 'STANDARD',
+        status: 'ACTIVE',
+        enrolmentDate: new Date().toISOString().split('T')[0],
+        effectiveStartDate: new Date().toISOString().split('T')[0],
+        currentExpiryDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0],
+        registeredBranchId: hqBranch.id,
+        subscriptionDate: new Date().toISOString().split('T')[0],
+        maturityDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0],
+        totalContributionsAmount: 50000,
+        registeredByUserId: 'usr-it-ivan',
+        registeredByUsername: 'ivan',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
     // STEP 2: DASHBOARD & TELEMETRY
     try {
       const users = serverStore.getUsers();

@@ -103,9 +103,12 @@ reportRouter.get('/data', requirePermission('reports.view'), (req: Authenticated
       } else {
         dataset = members.map(m => ({
           saccoAccountNumber: m.saccoAccountNumber,
+          accountValidity: 'PERMANENT',
           fullName: m.fullName,
           branchName: m.branchName,
           contactPhone: m.primaryPhone,
+          clientStatus: m.clientStatus || 'ALIVE',
+          turihamweStatus: m.turihamweStatus || 'UNREGISTERED',
           membershipStatus: m.turihamweStatus || 'ACTIVE',
           registrationDate: m.registrationDate,
           idType: 'NATIONAL_ID',

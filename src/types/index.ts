@@ -170,6 +170,7 @@ export type AuditAction =
   | 'PLAN_UPDATED'
   | 'PLAN_REACTIVATED'
   | 'PLAN_STATUS_CHANGED'
+  | 'EXISTING_MEMBER_AGE_VERIFIED'
   | 'REACTIVATION_ATTEMPT_REJECTED'
   | 'CLAIM_CREATED'
   | 'CLAIM_EDITED'
@@ -206,6 +207,8 @@ export type AuditAction =
   | 'BACKUP_CREATED'
   | 'BACKUP_VERIFIED'
   | 'BACKUP_RESTORED'
+  | 'BACKUP_DELETED'
+  | 'BACKUP_DOWNLOADED'
   | 'BACKUP_CONFIG_CHANGED'
   | 'SESSION_INVALIDATED'
   | 'SYSTEM_ERROR_LOGGED'
@@ -244,7 +247,8 @@ export interface AuditLog {
 }
 
 export interface SaccoMember {
-  saccoAccountNumber: string; // Primary identifier, strictly unique
+  saccoAccountNumber: string; // Permanent institutional member record: strictly unique, NO expiry date, NO time limitation, NO automatic deactivation, indefinite validity.
+  isPermanentAccount?: true; // SACCO account numbers remain indefinitely valid and never expire
   fullName: string;
   gender: 'MALE' | 'FEMALE' | 'OTHER';
   dateOfBirth: string;
@@ -257,11 +261,18 @@ export interface SaccoMember {
   parish: string;
   village: string;
   registrationDate: string;
+  occupation?: string;
+  monthlyIncomeUgx?: number;
+  nextOfKinName?: string;
+  nextOfKinRelationship?: string;
+  nextOfKinPhone?: string;
   branchId: string;
   branchName?: string;
   createdById?: string;
+  registeredByStaffId?: string;
   createdByUsername?: string;
   isLockedFromNormalEdit?: boolean;
+  status?: string; // Legacy alias for active/inactive in tests
   turihamweStatus?: 'ACTIVE' | 'EXPIRED' | 'UNREGISTERED' | 'SUSPENDED';
   clientStatus?: 'ALIVE' | 'DECEASED'; // Explicit client vitality status (default: ALIVE)
   clientStatusUpdatedAt?: string;
@@ -273,8 +284,8 @@ export interface SaccoMember {
   deletedByUserId?: string;
   deletedByUsername?: string;
   deletedReason?: string;
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ControlledCorrection {
@@ -313,6 +324,10 @@ export interface SyncRecord {
 
 export type TurihamwePlanStatus =
   | 'ACTIVE'
+  | 'MATURED / AWAITING RENEWAL'
+  | 'WITHIN GRACE PERIOD'
+  | 'INACTIVE'
+  | 'REACTIVATED'
   | 'PENDING'
   | 'EXPIRED'
   | 'SUSPENDED'
@@ -331,7 +346,11 @@ export interface TurihamwePlan {
   effectiveStartDate: string;
   currentExpiryDate: string;
   // Core Business Rules & Subscription Fields
-  subscriptionDate: string; // Authoritative recorded subscription date (YYYY-MM-DD)
+  subscriptionDate?: string; // Authoritative recorded subscription date (YYYY-MM-DD)
+  memberAccountNumber?: string; // Alias for saccoAccountNumber in tests
+  planType?: string; // Alias for planCode in tests
+  startDate?: string; // Alias for effectiveStartDate in legacy tests
+  endDate?: string; // Alias for currentExpiryDate in legacy tests
   maturityDate?: string; // Calculated annual maturity date (1-year anniversary of subscriptionDate)
   nextScheduledAlertDate?: string; // Actual maturity date on which the official reminder is scheduled
   lastAlertStatus?: string; // 'SCHEDULED' | 'QUEUED' | 'SENT' | 'FAILED' | 'NONE'
@@ -347,13 +366,16 @@ export interface TurihamwePlan {
   isRecordKeepingOnly?: boolean; // True when contribution is administrative record only
   lastRenewalDate?: string;
   registeredBranchId: string;
+  branchId?: string; // Convenience alias for registeredBranchId in legacy fixtures
   registeredBranchName?: string;
   registeredByUserId: string;
   registeredByUsername?: string;
   beneficiaryCount?: number;
   totalContributionsAmount?: number;
+  totalContributionsUgx?: number; // Legacy alias for totalContributionsAmount in tests
   lastContributionDate?: string;
   notes?: string;
+  registeredAt?: string; // Legacy alias for enrolmentDate/createdAt in tests
   createdAt: string; // Record-entry timestamp (stored separately from subscriptionDate)
   updatedAt: string;
 }
@@ -475,6 +497,15 @@ export interface PlanReactivationLog {
  * Explicitly models all unconfirmed business rules as configurable state rather than invented hardcoded values.
  */
 export interface BusinessRulesConfig {
+  charges?: {
+    status: 'ACTIVE_POLICY';
+    registrationFeeUGX: number;
+    annualRenewalFeeUGX: number;
+    postLapseReactivationFeeUGX: number;
+    benefitAmountUGX: number;
+    isConfigurable: boolean;
+    notes: string;
+  };
   contributionAmount: {
     status: 'ACTIVE_POLICY';
     defaultAmount: number | null;
@@ -491,12 +522,22 @@ export interface BusinessRulesConfig {
   planDuration: {
     status: 'ACTIVE_POLICY';
     durationYears: number;
+    durationMonths?: number;
+    notes: string;
+  };
+  gracePeriod?: {
+    status: 'ACTIVE_POLICY' | 'STRICTLY_PROHIBITED';
+    noticeWindowDays: number;
+    lapsePeriodMonths: number;
+    isConfigurable: boolean;
     notes: string;
   };
   alertSchedule: {
     status: 'ACTIVE_POLICY';
     triggerEvent: 'EXACT_MATURITY_DATE';
     advanceRemindersEnabled: false;
+    smsProvider?: 'PANDORA';
+    approvedMessageText?: string;
     notes: string;
   };
   financialPenalties: {
@@ -506,9 +547,9 @@ export interface BusinessRulesConfig {
     notes: string;
   };
   gracePeriodDays: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL';
+    status: 'ACTIVE_POLICY' | 'PENDING_INSTITUTIONAL_APPROVAL' | 'STRICTLY_PROHIBITED';
     defaultDays: number | null;
-    isConfigurable: true;
+    isConfigurable: boolean;
     notes: string;
   };
   renewalCoverPeriodMonths: {
@@ -518,14 +559,41 @@ export interface BusinessRulesConfig {
     notes: string;
   };
   reactivationEligibility: {
-    status: 'CONTROLLED_WORKFLOW';
+    status: 'ACTIVE_POLICY' | 'CONTROLLED_WORKFLOW';
+    feeUGX?: number;
     requiresBoardApproval: boolean;
     isConfigurable: true;
     notes: string;
   };
-  // PHASE 5: CLAIM BUSINESS RULES (CONFIGURABLE & PENDING INSTITUTIONAL RATIFICATION)
+  benefitAmountAndClaims?: {
+    status: 'ACTIVE_POLICY';
+    currentBenefitUGX: number;
+    requiresInstitutionalApprovalForIncrease: boolean;
+    notes: string;
+  };
+  membershipLimits?: {
+    status: 'ACTIVE_POLICY';
+    maxFamilyMembers: number;
+    maxBeneficiaryAgeYears: number;
+    existingActivePlanExemption: boolean;
+    biologicalChildrenOnly: boolean;
+    biologicalParentsOnly: boolean;
+    singleSpouseOnly: boolean;
+    notes: string;
+  };
+  saccoAccountNumberPermanence?: {
+    status: 'ACTIVE_POLICY';
+    isPermanentRecord: true;
+    hasExpiryDate: false;
+    hasTimeLimitation: false;
+    automaticDeactivation: false;
+    restrictionsBasedOnTurihamwe: false;
+    indefiniteValidity: true;
+    notes: string;
+  };
+  // PHASE 5: CLAIM BUSINESS RULES
   claimQualifyingEvents: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL';
+    status: 'ACTIVE_POLICY' | 'PENDING_INSTITUTIONAL_APPROVAL';
     allowedEvents: string[];
     isConfigurable: true;
     notes: string;
@@ -537,13 +605,13 @@ export interface BusinessRulesConfig {
     notes: string;
   };
   claimExclusions: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL';
+    status: 'ACTIVE_POLICY' | 'PENDING_INSTITUTIONAL_APPROVAL';
     exclusionList: string[];
     isConfigurable: true;
     notes: string;
   };
   claimBenefitCalculation: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL';
+    status: 'ACTIVE_POLICY' | 'PENDING_INSTITUTIONAL_APPROVAL';
     benefitFormulaDescription: string | null;
     isConfigurable: true;
     notes: string;
@@ -555,16 +623,16 @@ export interface BusinessRulesConfig {
     notes: string;
   };
   claimApprovalHierarchy: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL';
+    status: 'ACTIVE_POLICY' | 'PENDING_INSTITUTIONAL_APPROVAL';
     requiresExecutiveApproval: boolean;
     requiresDualSignOffAboveThreshold: boolean;
     isConfigurable: true;
     notes: string;
   };
-  // PHASE 7: BUSINESS SETTINGS FRAMEWORK (UNCONFIRMED VALUES ARE CONFIGURABLE, NOT INVENTED)
+  // PHASE 7: BUSINESS SETTINGS FRAMEWORK
   notificationTiming: {
     status: 'ACTIVE_POLICY';
-    confirmedIntervalsDays: number[]; // [30, 14, 7, 0, -1]
+    confirmedIntervalsDays: number[];
     isConfigurable: true;
     notes: string;
   };
@@ -576,7 +644,7 @@ export interface BusinessRulesConfig {
     notes: string;
   };
   claimRequirements: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL';
+    status: 'ACTIVE_POLICY' | 'PENDING_INSTITUTIONAL_APPROVAL';
     mandatoryDocumentTypes: string[];
     isConfigurable: true;
     notes: string;
@@ -1002,6 +1070,23 @@ export interface BackupConfig {
   lastVerificationAt?: string;
   updatedAt: string;
   updatedByUserId: string;
+}
+
+export interface ScheduledBackupStatus {
+  scheduledBackupsEnabled: boolean;
+  frequency: string;
+  scheduleTimeKampala: string;
+  timezone: string;
+  workerRunning: boolean;
+  lastRunTime?: string;
+  lastRunDateUganda?: string;
+  lastStatus?: 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'IDLE';
+  lastBackupFilename?: string;
+  lastBackupChecksum?: string;
+  nextScheduledTimeUganda?: string;
+  dailyDeduplicationKey?: string;
+  storagePath: string;
+  fileFormat: string;
 }
 
 export interface SystemHealthMetrics {

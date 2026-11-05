@@ -4,7 +4,7 @@ import { AuditService } from './auditService';
 import { config } from '../config';
 import { PandoraAdapter } from './pandoraAdapter';
 import { smsQueueWorker } from './smsQueueWorker';
-import { diffInUgandaCalendarDays, getUgandaDateString } from '../../utils/timezone';
+import { diffInUgandaCalendarDays, getUgandaDateString, getUgandaDateTimeParts } from '../../utils/timezone';
 
 /**
  * EXACT APPROVED SMS EXPIRY NOTIFICATION TEMPLATE
@@ -65,7 +65,35 @@ export class SmsService {
     eventReferenceKey?: string;
     templateCategory?: any;
   }): { message?: SmsMessage; isDuplicate: boolean; duplicateReason?: string } {
-    // 1. Strict Duplicate Check
+    // 1. Discontinued Categories & Inactive Template Rejection Guard (SACCO Policy)
+    const discontinuedCategories = [
+      'EXPIRY_REMINDER_30_DAYS',
+      'EXPIRY_REMINDER_14_DAYS',
+      'EXPIRY_REMINDER_7_DAYS',
+      'CLAIM_SUBMITTED',
+      'CLAIM_DOCS_REQUESTED',
+      'CLAIM_APPROVED',
+      'CLAIM_REJECTED',
+      'CONTRIBUTION_RECEIVED',
+    ];
+    if (params.templateCategory && discontinuedCategories.includes(params.templateCategory)) {
+      return {
+        isDuplicate: false,
+        duplicateReason: `Rejected: Notification category '${params.templateCategory}' has been permanently discontinued and deleted under SACCO policy. Only exact-date expiry notice (EXPIRY_DATE_NOTICE) is permitted.`,
+      };
+    }
+
+    if (params.templateCategory) {
+      const tmpl = serverStore.getSmsTemplates().find(t => t.category === params.templateCategory || t.code === params.templateCategory);
+      if (tmpl && !tmpl.isActive) {
+        return {
+          isDuplicate: false,
+          duplicateReason: `Rejected: SMS template '${tmpl.code}' is INACTIVE.`,
+        };
+      }
+    }
+
+    // 2. Strict Duplicate Check
     if (params.eventReferenceKey) {
       const existing = serverStore.getSmsMessages().find(
         m => m.eventReferenceKey === params.eventReferenceKey && (m.status === 'SENT' || m.status === 'PENDING' || m.status === 'SENDING')
@@ -348,10 +376,18 @@ export class SmsService {
    * Exact approved wording in Runyankore:
    * "NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba"
    */
-  public static evaluateExpiryNotificationEvents(options?: { simulatedDate?: Date | string }): { eventsCreated: number; messagesQueued: number } {
+  public static evaluateExpiryNotificationEvents(options?: { simulatedDate?: Date | string; skipHourCheck?: boolean }): { eventsCreated: number; messagesQueued: number } {
     const plans = serverStore.getPlans().filter(p => p.status === 'ACTIVE' || p.status === 'EXPIRED');
     const now = options?.simulatedDate ? new Date(options.simulatedDate) : new Date();
+    const ugandaParts = getUgandaDateTimeParts(now);
     const todayUganda = getUgandaDateString(now);
+
+    // Ensure the single official expiry notification template (EXPIRY_DATE_NOTICE) is active
+    const dueTemplate = serverStore.getSmsTemplates().find(t => t.code === 'EXPIRY_DATE_NOTICE' || t.category === 'EXPIRY_DATE_NOTICE');
+    if (!dueTemplate || !dueTemplate.isActive) {
+      return { eventsCreated: 0, messagesQueued: 0 };
+    }
+
     let eventsCreated = 0;
     let messagesQueued = 0;
 
@@ -362,17 +398,33 @@ export class SmsService {
       // Exact Uganda calendar day difference (Africa/Kampala, UTC+3)
       const diffDays = diffInUgandaCalendarDays(targetMaturityDate, now);
 
+      // Rule: All advance reminder schedules (30d, 14d, 7d) are deactivated and suppressed
+      if (diffDays > 0) {
+        continue;
+      }
+
       let eventType: string | null = null;
       let templateCategory: any = null;
 
       if (diffDays === 0) {
         // Plan reaches maturity today in Uganda
+        // Time Rule: Hold until approved sending time of 09:00 Africa/Kampala
+        if (!options?.skipHourCheck && ugandaParts.hour < 9) {
+          continue;
+        }
         eventType = 'EXPIRY_DUE_TODAY';
         templateCategory = 'EXPIRY_DATE_NOTICE';
-      } else if (diffDays < 0 && diffDays >= -7) {
-        // Downtime recovery: plan reached maturity during downtime and was not reminded
+      } else if (diffDays < 0 && diffDays >= -3) {
+        // Temporary offline/downtime recovery: Plan matured during system downtime (1-3 days ago)
+        // and never received its notification. Respect 09:00 sending time.
+        if (!options?.skipHourCheck && ugandaParts.hour < 9) {
+          continue;
+        }
         eventType = 'EXPIRY_OVERDUE_RECOVERY';
         templateCategory = 'EXPIRY_DATE_NOTICE';
+      } else {
+        // Expired weeks or months ago (diffDays < -3): strictly no retrospective reminder spam
+        continue;
       }
 
       if (eventType && templateCategory) {
@@ -397,7 +449,7 @@ export class SmsService {
               planId: plan.id,
               branchId: plan.registeredBranchId,
               branchName: plan.registeredBranchName || 'Nyamuyanja Branch',
-              description: `Automated maturity notification on plan ${plan.planCode || plan.id} reaching maturity date ${targetMaturityDate}`,
+              description: `Official plan expiry notice on plan ${plan.planCode || plan.id} reaching maturity date ${targetMaturityDate}`,
               processed: true,
               processedAt: new Date().toISOString(),
               createdAt: new Date().toISOString(),
@@ -406,7 +458,7 @@ export class SmsService {
             serverStore.addNotificationEvent(newEvent);
             eventsCreated++;
 
-            // EXACT approved text (Requirement 2 & 5) - strictly preserved without alteration
+            // EXACT approved text: "NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba"
             const messageContent = APPROVED_EXPIRY_SMS_TEXT;
 
             const queueResult = this.queueMessage({

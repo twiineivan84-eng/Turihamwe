@@ -178,7 +178,7 @@ export class SeedService {
       serverStore.updateUser(existingIvan.id, {
         roleId: itRole.id,
         roleName: itRole.name,
-        passwordHash: ivanPasswordHash,
+        passwordHash: existingIvan.passwordHash || ivanPasswordHash,
         hasMultiBranchAccess: true,
         allowedBranchIds: branches.map(b => b.id),
         isActive: true,
@@ -201,7 +201,7 @@ export class SeedService {
             roleName: itRole.name,
             hasMultiBranchAccess: true,
           }),
-          reason: 'Updated existing account to default IT Officer administrator role and initial credentials',
+          reason: 'Updated existing account to default IT Officer administrator role and verified permissions',
         });
       }
     }
@@ -224,11 +224,11 @@ export class SeedService {
       });
     }
 
-    const isDeploymentReady = serverStore.getSystemSettings()['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true';
+    const isDeploymentReady = serverStore.getSystemSettings()['deployment.ready'] === 'true';
+    const allowDevSeed = !isDeploymentReady && process.env.ALLOW_DEV_SEED === 'true';
 
-    // Only seed dev users if the system is NOT marked deployment-ready.
-    // Crucially: NEVER re-seed any account that was explicitly deleted by an administrator.
-    if (!isDeploymentReady) {
+    // Only seed dev users if explicitly permitted in dedicated development test runs
+    if (allowDevSeed) {
       for (const u of devSeedUsers) {
         if (
           u.username !== 'ivan' &&
@@ -241,7 +241,7 @@ export class SeedService {
       }
     }
 
-    if (!isDeploymentReady) {
+    if (allowDevSeed) {
       // Ensure essential SACCO members exist
       const now = new Date();
       const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 3600 * 1000).toISOString();
@@ -531,48 +531,9 @@ export class SeedService {
     }
   }
 
-    // Seed default SMS templates if none exist
+    // Seed default SMS templates if none exist (EXPIRY_DATE_NOTICE is the ONLY approved template)
     if (serverStore.getSmsTemplates().length === 0) {
       const defaultTemplates = [
-        {
-          id: 'tmpl-exp-30',
-          code: 'EXPIRY_30_DAYS',
-          category: 'EXPIRY_REMINDER_30_DAYS' as const,
-          name: '30-Day Policy Expiry Reminder',
-          templateText: 'Dear [Member Name], your Turihamwe cover with Nyamuyanja SACCO expires on [Expiry Date]. Please renew at [Branch] before the expiry date to maintain your funeral coverage benefits.',
-          availableVariables: ['[Member Name]', '[Expiry Date]', '[Branch]', '[Policy Code]', '[Account Number]'],
-          isActive: true,
-          createdByUserId: 'usr-it-01',
-          createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: 'tmpl-exp-14',
-          code: 'EXPIRY_14_DAYS',
-          category: 'EXPIRY_REMINDER_14_DAYS' as const,
-          name: '14-Day Expiry Urgent Reminder',
-          templateText: 'Reminder: Dear [Member Name], your Turihamwe funeral coverage expires in 14 days on [Expiry Date]. Avoid benefit lapse by renewing at [Branch].',
-          availableVariables: ['[Member Name]', '[Expiry Date]', '[Branch]', '[Policy Code]'],
-          isActive: true,
-          createdByUserId: 'usr-it-01',
-          createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: 'tmpl-exp-7',
-          code: 'EXPIRY_7_DAYS',
-          category: 'EXPIRY_REMINDER_7_DAYS' as const,
-          name: '7-Day Expiry Critical Warning',
-          templateText: 'URGENT: Dear [Member Name], 7 days remaining for Turihamwe policy [Policy Code] expiring [Expiry Date]. Renew now at [Branch] or via teller.',
-          availableVariables: ['[Member Name]', '[Expiry Date]', '[Branch]', '[Policy Code]'],
-          isActive: true,
-          createdByUserId: 'usr-it-01',
-          createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
         {
           id: 'tmpl-exp-due',
           code: 'EXPIRY_DATE_NOTICE',
@@ -580,71 +541,6 @@ export class SeedService {
           name: 'Official Turihamwe Plan Expiry Notice',
           templateText: 'NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba',
           availableVariables: [],
-          isActive: true,
-          createdByUserId: 'usr-it-01',
-          createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: 'tmpl-clm-sub',
-          code: 'CLAIM_SUBMITTED_NOTICE',
-          category: 'CLAIM_SUBMITTED' as const,
-          name: 'Claim Submitted Acknowledgement',
-          templateText: 'Dear [Member Name], claim docket [Claim Reference] has been received and entered review under [Branch]. You will be updated as review progresses.',
-          availableVariables: ['[Member Name]', '[Claim Reference]', '[Branch]'],
-          isActive: true,
-          createdByUserId: 'usr-it-01',
-          createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: 'tmpl-clm-docs',
-          code: 'CLAIM_DOCS_REQUESTED_NOTICE',
-          category: 'CLAIM_DOCS_REQUESTED' as const,
-          name: 'Claim Additional Documents Requested',
-          templateText: 'Dear [Member Name], additional documents are required to process claim [Claim Reference]. Please deliver requested papers to [Branch].',
-          availableVariables: ['[Member Name]', '[Claim Reference]', '[Branch]'],
-          isActive: true,
-          createdByUserId: 'usr-it-01',
-          createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: 'tmpl-clm-app',
-          code: 'CLAIM_APPROVED_NOTICE',
-          category: 'CLAIM_APPROVED' as const,
-          name: 'Claim Approved Notification',
-          templateText: 'Dear [Member Name], claim docket [Claim Reference] has been APPROVED. Disbursement processing is underway at [Branch].',
-          availableVariables: ['[Member Name]', '[Claim Reference]', '[Branch]'],
-          isActive: true,
-          createdByUserId: 'usr-it-01',
-          createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: 'tmpl-clm-rej',
-          code: 'CLAIM_REJECTED_NOTICE',
-          category: 'CLAIM_REJECTED' as const,
-          name: 'Claim Rejection Formal Notification',
-          templateText: 'Notice: Claim docket [Claim Reference] could not be approved following policy review. Visit [Branch] for official documented explanation.',
-          availableVariables: ['[Member Name]', '[Claim Reference]', '[Branch]'],
-          isActive: true,
-          createdByUserId: 'usr-it-01',
-          createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: 'tmpl-contrib-rec',
-          code: 'CONTRIBUTION_RECEIPT_NOTICE',
-          category: 'CONTRIBUTION_RECEIVED' as const,
-          name: 'Contribution Receipt Notification',
-          templateText: 'Nyamuyanja SACCO: Received UGX [Amount UGX] for Turihamwe Account [Account Number]. Receipt Ref: [Receipt Number]. Thank you.',
-          availableVariables: ['[Member Name]', '[Account Number]', '[Amount UGX]', '[Receipt Number]', '[Branch]'],
           isActive: true,
           createdByUserId: 'usr-it-01',
           createdByUserFullName: 'Isaac Tumwesigye (IT Officer)',
@@ -662,7 +558,23 @@ export class SeedService {
       if (existingDueTmpl && existingDueTmpl.templateText !== 'NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba') {
         existingDueTmpl.templateText = 'NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba';
         existingDueTmpl.name = 'Official Turihamwe Plan Expiry Notice';
+        existingDueTmpl.isActive = true;
         serverStore.updateSmsTemplate(existingDueTmpl);
+      }
+
+      // Delete discontinued templates permanently per SACCO policy
+      const discontinuedCodes = [
+        'EXPIRY_30_DAYS',
+        'EXPIRY_14_DAYS',
+        'EXPIRY_7_DAYS',
+        'CLAIM_SUBMITTED_NOTICE',
+        'CLAIM_DOCS_REQUESTED_NOTICE',
+        'CLAIM_APPROVED_NOTICE',
+        'CLAIM_REJECTED_NOTICE',
+        'CONTRIBUTION_RECEIPT_NOTICE',
+      ];
+      for (const code of discontinuedCodes) {
+        serverStore.deleteSmsTemplate(code);
       }
     }
 

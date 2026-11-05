@@ -3,7 +3,7 @@ import { requireAuth, requirePermission, AuthenticatedRequest } from '../middlew
 import { serverStore } from '../storage/serverStore';
 import { SaccoMember, ControlledCorrection, Beneficiary } from '../../types';
 import { AuditService } from '../services/auditService';
-import { isWithinUgandaFiveDaysWindow } from '../../utils/timezone';
+import { isWithinUgandaFiveDaysWindow, calculateUgandaAge, MAX_TURIHAMWE_ELIGIBLE_AGE } from '../../utils/timezone';
 
 export const memberRouter = Router();
 
@@ -63,6 +63,7 @@ memberRouter.get(
         branchName: branch ? branch.name : m.branchName,
         isLockedFromNormalEdit: locked,
         turihamweStatus: m.turihamweStatus || 'UNREGISTERED',
+        isPermanentAccount: true, // Permanent SACCO account number with indefinite validity
       };
     });
 
@@ -97,6 +98,7 @@ memberRouter.get(
       success: true,
       data: {
         ...member,
+        isPermanentAccount: true, // Permanent SACCO account number with indefinite validity
         clientStatus: member.clientStatus || 'ALIVE',
         branchName: branch ? branch.name : member.branchName,
         isLockedFromNormalEdit: locked,
@@ -228,9 +230,15 @@ memberRouter.post(
     const registrationDate = body.registrationDate || nowIso.split('T')[0];
     const clientStatus = body.clientStatus === 'DECEASED' ? 'DECEASED' : 'ALIVE';
 
-    // Requirement 3: Validate beneficiaries submitted in the registration workflow
+    // Requirement 3 & Policy 7: Validate beneficiaries submitted in the registration workflow
     const beneficiariesToCreate: Beneficiary[] = [];
     if (Array.isArray(body.beneficiaries) && body.beneficiaries.length > 0) {
+      if (body.beneficiaries.length > 12) {
+        res.status(400).json({ error: 'Maximum family membership limit of 13 members (1 primary member + 12 beneficiaries) exceeded for this Turihamwe plan.' });
+        return;
+      }
+
+      let spouseCount = 0;
       for (let i = 0; i < body.beneficiaries.length; i++) {
         const b = body.beneficiaries[i];
         const bName = (b.fullName || '').trim();
@@ -254,9 +262,33 @@ memberRouter.post(
           res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): Date of birth cannot be in the future.` });
           return;
         }
+
+        // Policy 7: Maximum age at enrollment is 70 years (authoritative Africa/Kampala calendar calculation)
+        const ageRes = calculateUgandaAge(bDob);
+        if (!ageRes.isValid) {
+          res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): ${ageRes.error}` });
+          return;
+        }
+        if (!ageRes.isEligibleForTurihamwe) {
+          res.status(400).json({
+            error: `Beneficiary #${i + 1} (${bName}): Beneficiary age (${ageRes.age} years) exceeds the maximum eligible age of ${MAX_TURIHAMWE_ELIGIBLE_AGE} years at initial enrollment under Turihamwe policy.`,
+          });
+          return;
+        }
+
         if (!bRel) {
           res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): Relationship to member is required.` });
           return;
+        }
+
+        // Policy 7: Maximum 1 spouse/wife
+        const relLower = bRel.toLowerCase();
+        if (['spouse', 'wife', 'husband'].includes(relLower)) {
+          spouseCount++;
+          if (spouseCount > 1) {
+            res.status(400).json({ error: 'Only one spouse/wife may be registered under a single Turihamwe plan.' });
+            return;
+          }
         }
 
         beneficiariesToCreate.push({
@@ -771,9 +803,38 @@ memberRouter.post(
       res.status(400).json({ error: 'Beneficiary date of birth cannot be in the future.' });
       return;
     }
-    if (!relationship || !relationship.trim()) {
-      res.status(400).json({ error: 'Beneficiary relationship is required.' });
+    // Policy 7: Enforce max family members (1 primary member + up to 12 active beneficiaries = 13)
+    const existingBeneficiaries = serverStore.getBeneficiaries(undefined, member.saccoAccountNumber).filter(b => b.isActive !== false);
+    if (existingBeneficiaries.length >= 12) {
+      res.status(400).json({ error: 'Maximum family membership limit of 13 members (1 primary member + 12 beneficiaries) reached for this Turihamwe plan.' });
       return;
+    }
+
+    // Policy 7: Enforce maximum age of 70 years at enrollment (authoritative Africa/Kampala calendar calculation, exempting members with running active plans)
+    const ageRes = calculateUgandaAge(dateOfBirth);
+    if (!ageRes.isValid) {
+      res.status(400).json({ error: `Beneficiary date of birth validation failed: ${ageRes.error}` });
+      return;
+    }
+    if (!ageRes.isEligibleForTurihamwe) {
+      const memberPlans = serverStore.getPlansForMember(member.saccoAccountNumber);
+      const hasActivePlan = memberPlans.some(p => ['ACTIVE', 'MATURED / AWAITING RENEWAL', 'WITHIN GRACE PERIOD', 'PENDING_RENEWAL'].includes(p.status));
+      if (!hasActivePlan) {
+        res.status(400).json({
+          error: `Beneficiary age (${ageRes.age} years) exceeds the maximum eligible age of ${MAX_TURIHAMWE_ELIGIBLE_AGE} years at initial enrollment under Turihamwe policy.`,
+        });
+        return;
+      }
+    }
+
+    // Policy 7: Enforce maximum 1 spouse/wife
+    const relLower = relationship.trim().toLowerCase();
+    if (['spouse', 'wife', 'husband'].includes(relLower)) {
+      const existingSpouse = existingBeneficiaries.find(b => ['spouse', 'wife', 'husband'].includes(b.relationship.toLowerCase()));
+      if (existingSpouse) {
+        res.status(400).json({ error: 'Only one spouse/wife may be registered under a single Turihamwe plan.' });
+        return;
+      }
     }
 
     const nowIso = new Date().toISOString();

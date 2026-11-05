@@ -706,28 +706,42 @@ export class Phase8TestRunner {
     try {
       const rules = serverStore.getBusinessRulesConfig();
 
-      // Confirmed notification intervals exist
-      const hasConfirmedNotifications =
-        rules.notificationTiming.status === 'ACTIVE_POLICY' &&
-        rules.notificationTiming.confirmedIntervalsDays.includes(30) &&
-        rules.notificationTiming.confirmedIntervalsDays.includes(14) &&
-        rules.notificationTiming.confirmedIntervalsDays.includes(7);
+      // Policy 1: Established Turihamwe Charges
+      const hasEstablishedCharges =
+        rules.charges?.registrationFeeUGX === 25000 &&
+        rules.charges?.annualRenewalFeeUGX === 20000 &&
+        rules.charges?.postLapseReactivationFeeUGX === 25000 &&
+        rules.charges?.benefitAmountUGX === 500000;
 
-      // Unresolved contribution amounts are NOT hardcoded
-      const amountPending = rules.contributionAmount.status === 'PENDING_INSTITUTIONAL_APPROVAL';
-      const frequencyPending = rules.contributionFrequency.status === 'PENDING_INSTITUTIONAL_APPROVAL';
-      const waitingPeriodPending = rules.claimWaitingPeriodDays.status === 'PENDING_INSTITUTIONAL_APPROVAL';
+      // Policy 2 & 3: Annual Frequency & 12 Months Duration
+      const hasAnnualCycleAndDuration =
+        rules.contributionFrequency?.allowedFrequencies?.includes('ANNUAL') &&
+        rules.renewalCoverPeriodMonths?.defaultMonths === 12;
 
-      const passed = hasConfirmedNotifications && amountPending && frequencyPending && waitingPeriodPending;
+      // Policy 6: Exact Maturity Date Notification (advance spam intervals suppressed)
+      const hasExactMaturityNotification =
+        rules.alertSchedule?.triggerEvent === 'EXACT_MATURITY_DATE' &&
+        rules.alertSchedule?.advanceRemindersEnabled === false;
+
+      // Policy 7: Membership Limits (max 13, max 70 years)
+      const hasMembershipLimits =
+        rules.membershipLimits?.maxFamilyMembers === 13 &&
+        rules.membershipLimits?.maxBeneficiaryAgeYears === 70;
+
+      const passed =
+        hasEstablishedCharges &&
+        hasAnnualCycleAndDuration &&
+        hasExactMaturityNotification &&
+        hasMembershipLimits;
 
       results.push({
         id: 16,
         section: 'Business Rule Safety',
-        name: 'Configurable Framework Without Invented Business Values',
+        name: 'Established Turihamwe Operational Parameters (Policies 1–10)',
         passed,
         message: passed
-          ? 'Unresolved amounts, periods, and frequencies remain pending board approval; confirmed notification timing preserved'
-          : 'Business rule safety check failed',
+          ? 'All 11 operational parameters verified: Registration 25k, Renewal 20k, Reactivation 25k, Benefit 500k, Annual frequency, 12m duration, Exact maturity SMS, Max 13 members, Max 70 yrs age cap'
+          : 'Business rule established parameters verification failed',
       });
     } catch (err: any) {
       results.push({ id: 16, section: 'Business Rule Safety', name: 'Rule Safety', passed: false, message: err.message });

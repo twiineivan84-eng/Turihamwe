@@ -1174,6 +1174,20 @@ export const SmsNotificationsView: React.FC = () => {
                       &quot;{tmpl.templateText}&quot;
                     </div>
 
+                    {tmpl.code === 'EXPIRY_DATE_NOTICE' && (
+                      <div className="mb-3 p-2 bg-emerald-50 rounded-lg border border-emerald-200 text-[11px] text-emerald-800 flex items-center gap-1.5 font-medium">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>Official Expiry Notification — Sent only on exact plan expiry date at 09:00 Africa/Kampala.</span>
+                      </div>
+                    )}
+
+                    {['EXPIRY_30_DAYS', 'EXPIRY_14_DAYS', 'EXPIRY_7_DAYS'].includes(tmpl.code) && (
+                      <div className="mb-3 p-2 bg-slate-100 rounded-lg border border-slate-200 text-[11px] text-slate-600 flex items-center gap-1.5 font-medium">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>Deactivated: Advance reminders discontinued. Only exact-date expiry notice (EXPIRY_DATE_NOTICE) is active.</span>
+                      </div>
+                    )}
+
                     <div className="text-[11px] text-slate-500 mb-3">
                       <span className="font-semibold text-slate-700 block mb-1">Supported Dynamic Variables:</span>
                       <div className="flex flex-wrap gap-1">
@@ -1607,19 +1621,10 @@ export const SmsNotificationsView: React.FC = () => {
                 <label className="block font-semibold text-slate-700 mb-1">Category</label>
                 <select
                   name="category"
-                  defaultValue={editingTemplate?.category || 'EXPIRY_REMINDER_7_DAYS'}
+                  defaultValue={editingTemplate?.category || 'EXPIRY_DATE_NOTICE'}
                   className="w-full p-2 border rounded-lg bg-white text-slate-900"
                 >
-                  <option value="EXPIRY_REMINDER_30_DAYS">30 Days Before Expiry</option>
-                  <option value="EXPIRY_REMINDER_14_DAYS">14 Days Before Expiry</option>
-                  <option value="EXPIRY_REMINDER_7_DAYS">7 Days Before Expiry</option>
-                  <option value="EXPIRY_DATE_NOTICE">Expiry Date Notification</option>
-                  <option value="POST_EXPIRY_FOLLOWUP">Post-Expiry Grace Follow-up</option>
-                  <option value="CLAIM_SUBMITTED">Claim Submitted</option>
-                  <option value="CLAIM_DOCS_REQUESTED">Claim Additional Documents Requested</option>
-                  <option value="CLAIM_APPROVED">Claim Approved</option>
-                  <option value="CLAIM_REJECTED">Claim Rejected</option>
-                  <option value="CONTRIBUTION_RECEIVED">Contribution Receipt Notification</option>
+                  <option value="EXPIRY_DATE_NOTICE">Expiry Date Notification (Official)</option>
                   <option value="CUSTOM_ANNOUNCEMENT">Custom Institutional Announcement</option>
                 </select>
               </div>
@@ -1639,16 +1644,37 @@ export const SmsNotificationsView: React.FC = () => {
                 </span>
               </div>
 
+              {editingTemplate && ['EXPIRY_30_DAYS', 'EXPIRY_14_DAYS', 'EXPIRY_7_DAYS'].includes(editingTemplate.code) && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-amber-800">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                    Advance Reminders Discontinued (SACCO Policy)
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-amber-700">
+                    Under Nyamuyanja SACCO approved policy, members receive only ONE expiry notification, sent strictly on the exact date of plan expiry. Advance reminders (30 days, 14 days, 7 days) are permanently deactivated and cannot be reactivated.
+                  </p>
+                </div>
+              )}
+
               <div className="flex items-center gap-2 pt-1">
                 <input
                   name="isActive"
                   type="checkbox"
                   id="tmplActive"
-                  defaultChecked={editingTemplate ? editingTemplate.isActive : true}
-                  className="rounded text-blue-600 h-4 w-4"
+                  disabled={Boolean(editingTemplate && ['EXPIRY_30_DAYS', 'EXPIRY_14_DAYS', 'EXPIRY_7_DAYS'].includes(editingTemplate.code))}
+                  defaultChecked={
+                    editingTemplate && ['EXPIRY_30_DAYS', 'EXPIRY_14_DAYS', 'EXPIRY_7_DAYS'].includes(editingTemplate.code)
+                      ? false
+                      : editingTemplate
+                      ? editingTemplate.isActive
+                      : true
+                  }
+                  className="rounded text-blue-600 h-4 w-4 disabled:opacity-50"
                 />
                 <label htmlFor="tmplActive" className="font-semibold text-slate-700">
-                  Active (Available for automatic and manual dispatches)
+                  {editingTemplate && ['EXPIRY_30_DAYS', 'EXPIRY_14_DAYS', 'EXPIRY_7_DAYS'].includes(editingTemplate.code)
+                    ? 'Inactive (Permanently deactivated under SACCO policy)'
+                    : 'Active (Available for automatic and manual dispatches)'}
                 </label>
               </div>
 

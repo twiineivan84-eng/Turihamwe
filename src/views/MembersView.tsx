@@ -9,6 +9,7 @@ import { LocalRepository } from '../db/local/localRepository';
 import { ContributionReceiptModal } from '../components/turihamwe/ContributionReceiptModal';
 import { RegisterPlanModal } from '../components/turihamwe/RegisterPlanModal';
 import { notifyRecordChanged, subscribeToRecordChanges } from '../utils/systemEvents';
+import { calculateUgandaAge, MAX_TURIHAMWE_ELIGIBLE_AGE } from '../utils/timezone';
 import {
   Users,
   Search,
@@ -523,13 +524,16 @@ export const MembersView: React.FC<MembersViewProps> = ({
         setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): Date of birth is required.` });
         return;
       }
-      const bDobTime = new Date(b.dateOfBirth).getTime();
-      if (isNaN(bDobTime)) {
-        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): Date of birth is invalid.` });
+      const ageRes = calculateUgandaAge(b.dateOfBirth);
+      if (!ageRes.isValid) {
+        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): ${ageRes.error}` });
         return;
       }
-      if (bDobTime > Date.now()) {
-        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): Date of birth cannot be in the future.` });
+      if (!ageRes.isEligibleForTurihamwe) {
+        setNotification({
+          type: 'error',
+          message: `Beneficiary #${i + 1} (${b.fullName}): Beneficiary age (${ageRes.age} years) exceeds the maximum eligible age of ${MAX_TURIHAMWE_ELIGIBLE_AGE} years at initial enrollment under Turihamwe policy.`,
+        });
         return;
       }
       if (!b.relationship.trim()) {
@@ -1221,9 +1225,15 @@ export const MembersView: React.FC<MembersViewProps> = ({
             )}
           </div>
         </form>
-        <p className="text-[11px] text-slate-400 mt-2">
-          Note: System policy strictly restricts search criteria to <strong>SACCO Account Number</strong> and <strong>Member Name</strong> only.
-        </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-slate-500 mt-2 gap-1.5">
+          <p>
+            Note: System policy strictly restricts search criteria to <strong>SACCO Account Number</strong> and <strong>Member Name</strong> only.
+          </p>
+          <span className="inline-flex items-center gap-1 font-semibold text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+            SACCO A/C Numbers: Permanent Records • Indefinite Validity • No Expiry
+          </span>
+        </div>
       </div>
 
       {/* Members Directory Table */}
@@ -1242,7 +1252,9 @@ export const MembersView: React.FC<MembersViewProps> = ({
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider">
               <tr>
-                <th className="px-6 py-3">SACCO A/C No.</th>
+                <th className="px-6 py-3" title="Permanent SACCO Member Record — Indefinite Validity (Never Expires)">
+                  SACCO A/C No. <span className="text-[10px] text-blue-700 font-bold">(Permanent)</span>
+                </th>
                 <th className="px-6 py-3">Member Name</th>
                 <th className="px-6 py-3">Branch</th>
                 <th className="px-6 py-3">Registration Date</th>
@@ -1272,8 +1284,13 @@ export const MembersView: React.FC<MembersViewProps> = ({
 
                   return (
                     <tr key={member.saccoAccountNumber} className="hover:bg-slate-50/80 transition">
-                      <td className="px-6 py-3.5 font-mono font-bold text-blue-900 tracking-wider">
-                        {member.saccoAccountNumber}
+                      <td className="px-6 py-3.5">
+                        <div className="font-mono font-bold text-blue-900 tracking-wider">
+                          {member.saccoAccountNumber}
+                        </div>
+                        <div className="text-[10px] text-blue-600 font-medium" title="Permanent institutional member record: No expiry date, remains valid indefinitely">
+                          Permanent Record
+                        </div>
                       </td>
                       <td className="px-6 py-3.5 font-semibold text-slate-900">
                         {member.fullName}
@@ -1609,10 +1626,18 @@ export const MembersView: React.FC<MembersViewProps> = ({
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <span className="text-slate-500 font-medium">SACCO Account Number (Primary ID):</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 font-medium">SACCO Account Number:</span>
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                          Permanent • Never Expires
+                        </span>
+                      </div>
                       <div className="font-mono font-bold text-blue-900 text-sm mt-0.5">
                         {selectedMember.saccoAccountNumber}
                       </div>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        Permanent institutional record with indefinite validity (not subject to Turihamwe expiry).
+                      </p>
                     </div>
                     <div>
                       <span className="text-slate-500 font-medium">Full Legal Name:</span>
@@ -2768,7 +2793,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
                       Beneficiary Enrolment (Optional, Multiple Allowed)
                     </h3>
                     <p className="text-[10px] text-slate-500">
-                      Enrol family beneficiaries during member registration. Future dates of birth are strictly rejected.
+                      Enrol family beneficiaries during member registration (Policy 7: Maximum eligible age is 70 years at enrollment; future dates of birth strictly rejected).
                     </p>
                   </div>
                   <button

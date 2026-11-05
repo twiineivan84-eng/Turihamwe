@@ -1192,25 +1192,42 @@ export async function runMasterVerificationSuite(): Promise<{
     results.push({ group: 'PART_B', testNumber: 26, name: 'Dummy Account itadm Purge', passed: false, message: err.message });
   }
 
-  // Test 27: Legitimate Staff Accounts Intact (gm001, bmnya, csh01, acct1, audit)
+  // Test 27: Production Cleanup Policy - Exclusively Ivan Preserved & Demo Accounts Purged
   try {
-    const requiredUsernames = ['gm001', 'bmnya', 'csh01', 'acct1', 'audit'];
+    const isDeploymentReady = serverStore.getSystemSettings()['deployment.ready'] === 'true';
+    const demoUsernames = ['gm001', 'bmnya', 'csh01', 'acct1', 'audit'];
     const users = serverStore.getUsers();
-    const foundUsernames = users.map(u => u.username);
-    const missing = requiredUsernames.filter(u => !foundUsernames.includes(u));
-    const passed = missing.length === 0;
+    const foundUsernames = users.map(u => u.username.toLowerCase());
+    
+    let passed = false;
+    let message = '';
+    
+    if (isDeploymentReady) {
+      // In production readiness mode, only ivan is present; demo accounts are purged
+      const hasIvan = foundUsernames.includes('ivan');
+      const hasNoDemoUsers = demoUsernames.every(u => !foundUsernames.includes(u));
+      const allDemoTombstoned = demoUsernames.every(u => serverStore.isUserDeleted(u));
+      passed = hasIvan && hasNoDemoUsers && allDemoTombstoned;
+      message = passed
+        ? "Production cleanup policy strictly verified: exclusively 'ivan' remains active; all demo accounts (gm001, bmnya, csh01, acct1, audit) are purged and tombstoned"
+        : `Production cleanup check failed: found usernames [${foundUsernames.join(', ')}], deleted tombstone check: ${allDemoTombstoned}`;
+    } else {
+      const missing = demoUsernames.filter(u => !foundUsernames.includes(u));
+      passed = missing.length === 0;
+      message = passed
+        ? `All operational staff accounts (${demoUsernames.join(', ')}) intact`
+        : `Missing staff accounts: ${missing.join(', ')}`;
+    }
 
     results.push({
       group: 'PART_B',
       testNumber: 27,
-      name: 'Legitimate Operational Staff Accounts Preserved Intact (GM, BM, Cashier, Acct, Auditor)',
+      name: 'Production Account Exclusivity: Only Genuine Ivan Preserved, Demo Accounts Purged & Tombstoned',
       passed,
-      message: passed
-        ? `All 5 authentic operational staff accounts (${requiredUsernames.join(', ')}) intact and active`
-        : `Missing legitimate staff accounts: ${missing.join(', ')}`,
+      message,
     });
   } catch (err: any) {
-    results.push({ group: 'PART_B', testNumber: 27, name: 'Legitimate Staff Preservation', passed: false, message: err.message });
+    results.push({ group: 'PART_B', testNumber: 27, name: 'Production Account Exclusivity', passed: false, message: err.message });
   }
 
   // Restore everything

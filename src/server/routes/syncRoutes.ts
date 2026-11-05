@@ -69,7 +69,7 @@ syncRouter.post('/push', requireAuth, (req: AuthenticatedRequest, res: Response)
               serverStore.addMember(payload);
             } else if (item.operation === 'UPDATE') {
               // Controlled conflict detection: Do not silently overwrite if central record was modified by another location
-              const centralUpdatedAt = new Date(existing.updatedAt).getTime();
+              const centralUpdatedAt = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
               const offlineTimestamp = new Date(item.localTimestamp).getTime();
               const hasConflict = centralUpdatedAt > offlineTimestamp && existing.updatedAt !== payload.updatedAt && existing.branchId !== req.workingBranch!.id;
 

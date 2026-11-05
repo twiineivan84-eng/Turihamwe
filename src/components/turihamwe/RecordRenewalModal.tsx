@@ -34,7 +34,7 @@ export const RecordRenewalModal: React.FC<RecordRenewalModalProps> = ({
   const [renewalDate, setRenewalDate] = useState(todayStr);
   const [effectiveDate, setEffectiveDate] = useState(plan?.currentExpiryDate || todayStr);
   const [newExpiryDate, setNewExpiryDate] = useState(calculateDefaultNewExpiry());
-  const [renewalFee, setRenewalFee] = useState<string>('');
+  const [renewalFee, setRenewalFee] = useState<string>('20000');
   const [receiptReference, setReceiptReference] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -153,11 +153,11 @@ export const RecordRenewalModal: React.FC<RecordRenewalModalProps> = ({
           </button>
         </div>
 
-        {/* Notice regarding uninvented business calculations */}
+        {/* Established Policy Note */}
         <div className="px-6 py-2.5 bg-blue-50 border-b border-blue-200 text-[11px] text-blue-900 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-blue-700 shrink-0" />
+          <ShieldCheck className="w-4 h-4 text-blue-700 shrink-0" />
           <span>
-            <strong>Configurable Architecture Note:</strong> Renewal duration, fee calculation, and grace periods remain configurable policy parameters. Specify the approved cover extension.
+            <strong>Established Turihamwe Policy:</strong> Annual renewal fee is UGX 20,000 paid on or before expiry date, extending coverage for exactly 12 calendar months.
           </span>
         </div>
 

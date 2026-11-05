@@ -22,6 +22,7 @@ import {
   ReportCategory,
   BackupRecord,
   BackupConfig,
+  ScheduledBackupStatus,
   SystemHealthMetrics,
   UserAuditHistory,
   BusinessRulesConfig,
@@ -582,6 +583,69 @@ class ApiClient {
     recordCounts?: BackupRecord['recordCounts'];
   }> {
     return this.request(`/system/backups/${encodeURIComponent(backupId)}/restore`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async downloadBackup(backupId: string): Promise<{ blob: Blob; filename: string; checksum?: string }> {
+    const url = `${API_BASE}/system/backups/${encodeURIComponent(backupId)}/download`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+    });
+    if (!res.ok) {
+      throw new Error(`Download failed with status HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('content-disposition');
+    let filename = `turihamwe_backup_${backupId}.bak`;
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) filename = match[1];
+    }
+    const checksum = res.headers.get('x-backup-checksum') || undefined;
+    return { blob, filename, checksum };
+  }
+
+  public async deleteBackup(backupId: string): Promise<{ success: boolean; message: string; data?: BackupRecord }> {
+    return this.request(`/system/backups/${encodeURIComponent(backupId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  public async getScheduledBackupStatus(): Promise<{ success: boolean; data: ScheduledBackupStatus }> {
+    return this.request('/system/backups/scheduled-status');
+  }
+
+  public async validateBackupFile(content: string): Promise<{
+    success: boolean;
+    data: {
+      valid: boolean;
+      checksum: string;
+      manifest?: any;
+      recordCounts?: BackupRecord['recordCounts'];
+      errors: string[];
+    };
+  }> {
+    return this.request('/system/backups/validate-upload', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  public async restoreBackupFromFile(data: {
+    content: string;
+    reason: string;
+    confirmationAcknowledged: boolean;
+    filename?: string;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    recordCounts?: BackupRecord['recordCounts'];
+    checksum?: string;
+  }> {
+    return this.request('/system/backups/restore-upload', {
       method: 'POST',
       body: JSON.stringify(data),
     });

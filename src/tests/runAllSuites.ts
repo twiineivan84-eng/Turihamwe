@@ -20,6 +20,10 @@ import { runRecordPropagationTests } from './recordPropagationAcrossSystem.test'
 import { runLiveAudit } from './liveAuditSuite';
 import { runSmsExclusivityAndPandoraSuite } from './smsExclusivityAndPandoraPipeline.test';
 import { runMasterVerificationSuite } from './masterImplementationVerification.test';
+import { MasterProductionDeploymentTestRunner } from './masterProductionDeployment.test';
+import { TurihamweAgeValidationAuditRunner } from './turihamweAgeValidationAudit.test';
+import { ExistingMemberAgeVerificationTestRunner } from './existingMemberAgeVerification.test';
+import { TurihamweSmsCleanupAuditRunner } from './turihamweSmsCleanupAudit.test';
 import { serverStore } from '../server/storage/serverStore';
 
 async function main() {
@@ -215,6 +219,88 @@ async function main() {
 
   // Reset SEED_TEST_DATA and purge test fixtures so operational database remains clean for production
   delete process.env.SEED_TEST_DATA;
+  serverStore.clearAllOperationalData('usr-it-ivan', 'ivan');
+
+  // 11. Master Production Deployment Verification Suite (Final Go-Live & Clean Slate)
+  console.log('\n>>> [SUITE 11/11] MASTER PRODUCTION DEPLOYMENT & GO-LIVE VERIFICATION');
+  try {
+    const prodResults = await MasterProductionDeploymentTestRunner.runAllTests();
+    for (const r of prodResults) {
+      grandTotal++;
+      if (r.passed) {
+        grandPassed++;
+        console.log(`  ✓ Test ${r.id.toString().padStart(2, '0')}: ${r.name}`);
+      } else {
+        grandFailed++;
+        hasAnyFailure = true;
+        console.log(`  ✗ Test ${r.id.toString().padStart(2, '0')}: ${r.name} — ${r.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error('Master production deployment suite execution error:', err.message);
+    hasAnyFailure = true;
+  }
+
+  // 12. Maximum Age Limit (70 Years) Source-Code Audit Suite
+  console.log('\n>>> [SUITE 12/12] TURIHAMWE MAXIMUM AGE LIMIT (70 YEARS) SOURCE-CODE AUDIT');
+  try {
+    const ageResults = await TurihamweAgeValidationAuditRunner.runAllTests();
+    for (const r of ageResults) {
+      grandTotal++;
+      if (r.passed) {
+        grandPassed++;
+        console.log(`  ✓ Test ${r.id.toString().padStart(2, '0')}: ${r.name}`);
+      } else {
+        grandFailed++;
+        hasAnyFailure = true;
+        console.log(`  ✗ Test ${r.id.toString().padStart(2, '0')}: ${r.name} — ${r.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error('Age validation audit suite execution error:', err.message);
+    hasAnyFailure = true;
+  }
+
+  // 13. Existing Member Age Verification & Grandfathering Suite (12 Scenarios)
+  console.log('\n>>> [SUITE 13/13] EXISTING MEMBER AGE VERIFICATION & GRANDFATHERING WORKFLOW (12 SCENARIOS)');
+  try {
+    const existingAgeResults = await ExistingMemberAgeVerificationTestRunner.runAllTests();
+    for (const r of existingAgeResults) {
+      grandTotal++;
+      if (r.passed) {
+        grandPassed++;
+        console.log(`  ✓ Test ${r.id.toString().padStart(2, '0')}: ${r.name}`);
+      } else {
+        grandFailed++;
+        hasAnyFailure = true;
+        console.log(`  ✗ Test ${r.id.toString().padStart(2, '0')}: ${r.name} — ${r.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error('Existing member age verification suite execution error:', err.message);
+    hasAnyFailure = true;
+  }
+
+  // 14. Turihamwe SMS Cleanup & Single Expiry Notification Policy Suite (12 Scenarios)
+  try {
+    const smsCleanupResults = await TurihamweSmsCleanupAuditRunner.runAllTests();
+    for (const r of smsCleanupResults) {
+      grandTotal++;
+      if (r.passed) {
+        grandPassed++;
+        console.log(`  ✓ Test ${r.id.toString().padStart(2, '0')}: ${r.name}`);
+      } else {
+        grandFailed++;
+        hasAnyFailure = true;
+        console.log(`  ✗ Test ${r.id.toString().padStart(2, '0')}: ${r.name} — ${r.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error('Turihamwe SMS cleanup audit suite execution error:', err.message);
+    hasAnyFailure = true;
+  }
+
+  // Ensure database remains in clean production state
   serverStore.clearAllOperationalData('usr-it-ivan', 'ivan');
 
   console.log('================================================================');

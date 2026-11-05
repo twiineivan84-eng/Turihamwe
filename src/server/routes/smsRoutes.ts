@@ -39,6 +39,24 @@ smsRouter.post('/templates', requirePermission('sms.manage_templates'), (req: Au
     return;
   }
 
+  const discontinuedCodes = [
+    'EXPIRY_30_DAYS',
+    'EXPIRY_14_DAYS',
+    'EXPIRY_7_DAYS',
+    'CLAIM_SUBMITTED_NOTICE',
+    'CLAIM_DOCS_REQUESTED_NOTICE',
+    'CLAIM_APPROVED_NOTICE',
+    'CLAIM_REJECTED_NOTICE',
+    'CONTRIBUTION_RECEIPT_NOTICE',
+  ];
+  if (discontinuedCodes.includes(code.toUpperCase().trim())) {
+    res.status(400).json({
+      success: false,
+      error: `Template code ${code} has been permanently discontinued and deleted under SACCO policy.`,
+    });
+    return;
+  }
+
   const newTemplate: SmsTemplate = {
     id: `tmpl-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     code: code.toUpperCase().trim(),
@@ -87,9 +105,30 @@ smsRouter.put('/templates/:id', requirePermission('sms.manage_templates'), (req:
   const { name, templateText, isActive, availableVariables } = req.body;
   const prev = JSON.stringify(template);
 
+  // SACCO Policy: Discontinued templates cannot be reactivated
+  const discontinuedCodes = [
+    'EXPIRY_30_DAYS',
+    'EXPIRY_14_DAYS',
+    'EXPIRY_7_DAYS',
+    'CLAIM_SUBMITTED_NOTICE',
+    'CLAIM_DOCS_REQUESTED_NOTICE',
+    'CLAIM_APPROVED_NOTICE',
+    'CLAIM_REJECTED_NOTICE',
+    'CONTRIBUTION_RECEIPT_NOTICE',
+  ];
+  if (discontinuedCodes.includes(template.code)) {
+    res.status(400).json({
+      success: false,
+      error: `Reactivation or modification of ${template.code} is strictly prohibited under approved SACCO policy. This template has been permanently discontinued and deleted. Only the single official expiry notification (EXPIRY_DATE_NOTICE) is active.`,
+    });
+    return;
+  }
+
   if (name) template.name = name.trim();
   if (templateText) template.templateText = templateText.trim();
-  if (isActive !== undefined) template.isActive = Boolean(isActive);
+  if (isActive !== undefined) {
+    template.isActive = Boolean(isActive);
+  }
   if (Array.isArray(availableVariables)) template.availableVariables = availableVariables;
 
   template.updatedByUserId = user.id;
@@ -161,12 +200,45 @@ smsRouter.post('/send', requirePermission('sms.send'), async (req: Authenticated
     claimId,
     eventReferenceKey,
     templateCategory,
+    templateId,
     dispatchImmediately,
   } = req.body;
 
   if (!recipientPhone || !recipientName || !messageText) {
     res.status(400).json({ success: false, error: 'recipientPhone, recipientName, and messageText are required' });
     return;
+  }
+
+  // Reject advance reminder categories
+  const advanceCategories = ['EXPIRY_REMINDER_30_DAYS', 'EXPIRY_REMINDER_14_DAYS', 'EXPIRY_REMINDER_7_DAYS'];
+  if (templateCategory && advanceCategories.includes(templateCategory)) {
+    res.status(400).json({
+      success: false,
+      error: `Cannot trigger message using discontinued category '${templateCategory}'. Advance expiry reminders are permanently deactivated under SACCO policy.`,
+    });
+    return;
+  }
+
+  if (templateId) {
+    const tmpl = serverStore.getSmsTemplateById(templateId);
+    if (tmpl && !tmpl.isActive) {
+      res.status(400).json({
+        success: false,
+        error: `Cannot trigger message using template '${tmpl.name}' (${tmpl.code}): template is INACTIVE under approved SACCO policy.`,
+      });
+      return;
+    }
+  }
+
+  if (templateCategory) {
+    const tmpl = serverStore.getSmsTemplates().find(t => t.category === templateCategory || t.code === templateCategory);
+    if (tmpl && !tmpl.isActive) {
+      res.status(400).json({
+        success: false,
+        error: `Cannot trigger message using template category '${templateCategory}': associated template is INACTIVE under approved SACCO policy.`,
+      });
+      return;
+    }
   }
 
   const queueResult = SmsService.queueMessage({
@@ -186,6 +258,11 @@ smsRouter.post('/send', requirePermission('sms.send'), async (req: Authenticated
 
   if (queueResult.isDuplicate) {
     res.status(409).json({ success: false, error: queueResult.duplicateReason, isDuplicate: true });
+    return;
+  }
+
+  if (!queueResult.message) {
+    res.status(400).json({ success: false, error: queueResult.duplicateReason || 'Failed to queue message.' });
     return;
   }
 

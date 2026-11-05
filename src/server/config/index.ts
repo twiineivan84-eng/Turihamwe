@@ -123,9 +123,33 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
     console.warn('[CONFIG] DATABASE_URL not set for central PostgreSQL; operating in Local_Transactional_Journal persistence mode.');
   }
 
-  const dataDir = path.resolve(process.cwd(), env.DATA_STORAGE_DIR || 'data');
-  const dataFile = path.resolve(dataDir, env.DATA_FILE_NAME || 'turihamwe_central_db.json');
-  const sqlitePath = env.SQLITE_DATABASE_PATH || path.resolve(dataDir, 'turihamwe-local.sqlite');
+  function isPlaceholder(val: string | undefined): boolean {
+    if (!val) return true;
+    const v = val.trim().toLowerCase();
+    return (
+      v.includes('the actual') ||
+      v.includes('must be confirmed') ||
+      v.includes('usually ') ||
+      v.includes('the hostname') ||
+      v.includes('the database') ||
+      v.includes('the password') ||
+      v.includes('configured on your') ||
+      v.includes('expected by your') ||
+      v.includes('generate a ')
+    );
+  }
+
+  function cleanEnvVal(val: string | undefined, fallback: string): string {
+    if (!val || isPlaceholder(val)) return fallback;
+    return val.trim();
+  }
+
+  const rawDataDir = cleanEnvVal(env.DATA_STORAGE_DIR, 'data');
+  const dataDir = path.resolve(process.cwd(), rawDataDir);
+  const rawDataFile = cleanEnvVal(env.DATA_FILE_NAME, 'turihamwe_central_db.json');
+  const dataFile = path.resolve(dataDir, rawDataFile);
+  const rawSqlitePath = cleanEnvVal(env.SQLITE_DATABASE_PATH, path.resolve(dataDir, 'turihamwe-local.sqlite'));
+  const sqlitePath = path.resolve(process.cwd(), rawSqlitePath);
 
   // SMS Gateway Configuration (Exclusive Provider: Pandora Networks)
   const smsEnabled = env.SMS_ENABLED !== 'false';
@@ -133,21 +157,23 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
 
   // Pandora Networks SMS (Exclusive Provider for Nyamuyanja SACCO Ltd, Uganda)
   // Official API: https://sms.thepandoranetworks.com/api
-  const rawApiUrl = (env.PANDORA_SMS_API_URL || '').trim();
+  const rawApiUrl = cleanEnvVal(env.PANDORA_SMS_API_URL, '');
   const pandoraApiUrl = (rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://'))
     ? rawApiUrl
     : 'https://www.sms.thepandoranetworks.com/API/send_sms/';
 
-  const rawBalanceUrl = (env.PANDORA_SMS_BALANCE_URL || '').trim();
+  const rawBalanceUrl = cleanEnvVal(env.PANDORA_SMS_BALANCE_URL, '');
   const pandoraBalanceUrl = (rawBalanceUrl.startsWith('http://') || rawBalanceUrl.startsWith('https://'))
     ? rawBalanceUrl
     : 'https://www.sms.thepandoranetworks.com/API/balance_inquiry.php';
 
-  const pandoraPhoneNumber = (env.PANDORA_SMS_PHONE_NUMBER || env.PANDORA_SMS_USERNAME || '').trim();
+  const rawPhone = cleanEnvVal(env.PANDORA_SMS_PHONE_NUMBER || env.PANDORA_SMS_USERNAME, '');
+  const pandoraPhoneNumber = rawPhone;
   const pandoraUsername = pandoraPhoneNumber;
-  const pandoraPassword = env.PANDORA_SMS_PASSWORD || '';
+  const pandoraPassword = cleanEnvVal(env.PANDORA_SMS_PASSWORD, '');
   // Maximum 11 characters GSM alphanumeric sender ID (e.g. NYAMUYANJA)
-  const pandoraSenderId = (env.PANDORA_SMS_SENDER_ID || 'NYAMUYANJA').replace(/[^a-zA-Z0-9]/g, '').slice(0, 11) || 'NYAMUYANJA';
+  const rawSender = cleanEnvVal(env.PANDORA_SMS_SENDER_ID, 'NYAMUYANJA');
+  const pandoraSenderId = rawSender.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11) || 'NYAMUYANJA';
 
   if (isProduction && smsEnabled && process.env.NODE_ENV === 'production' && !process.env.CI) {
     if (!pandoraPhoneNumber) {
@@ -159,17 +185,19 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
   }
 
   // File Storage Configuration
-  const uploadPath = path.resolve(process.cwd(), env.FILE_STORAGE_PATH || path.join(dataDir, 'uploads'));
+  const rawUploadPath = cleanEnvVal(env.FILE_STORAGE_PATH, path.join(dataDir, 'uploads'));
+  const uploadPath = path.resolve(process.cwd(), rawUploadPath);
   const maxUploadSizeMb = parseInt(env.MAX_UPLOAD_SIZE_MB || '10', 10);
 
   // Backup Configuration
   const backupEnabled = env.BACKUP_ENABLED !== 'false';
-  const backupStoragePath = path.resolve(process.cwd(), env.BACKUP_STORAGE_DIR || path.join(dataDir, 'backups'));
-  const backupEncryptionKey = env.BACKUP_ENCRYPTION_KEY;
+  const rawBackupStorage = cleanEnvVal(env.BACKUP_STORAGE_DIR, path.join(dataDir, 'backups'));
+  const backupStoragePath = path.resolve(process.cwd(), rawBackupStorage);
+  const backupEncryptionKey = isPlaceholder(env.BACKUP_ENCRYPTION_KEY) ? undefined : env.BACKUP_ENCRYPTION_KEY;
 
   // Synchronization Configuration
   const syncEnabled = env.SYNC_ENABLED !== 'false';
-  const syncApiUrl = env.SYNC_API_URL || '/api/sync';
+  const syncApiUrl = cleanEnvVal(env.SYNC_API_URL, '/api/sync');
   const syncIntervalSeconds = parseInt(env.SYNC_INTERVAL_SECONDS || '30', 10);
 
   return {
@@ -188,11 +216,11 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
     },
     database: {
       databaseUrl,
-      pgHost: env.PGHOST,
+      pgHost: isPlaceholder(env.PGHOST) ? undefined : env.PGHOST,
       pgPort,
-      pgDatabase: env.PGDATABASE,
-      pgUser: env.PGUSER,
-      pgPassword: env.PGPASSWORD,
+      pgDatabase: isPlaceholder(env.PGDATABASE) ? undefined : env.PGDATABASE,
+      pgUser: isPlaceholder(env.PGUSER) ? undefined : env.PGUSER,
+      pgPassword: isPlaceholder(env.PGPASSWORD) ? undefined : env.PGPASSWORD,
       sqlitePath,
       dataDir,
       dataFile,

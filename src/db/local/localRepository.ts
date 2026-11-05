@@ -230,6 +230,7 @@ export class LocalRepository {
     contributionDate: string;
     periodCoveredStart?: string;
     periodCoveredEnd?: string;
+    externalTransactionRef?: string;
     remarks?: string;
   }): Promise<Contribution> {
     const receiptNumber = `TRH-CTR-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
@@ -249,6 +250,7 @@ export class LocalRepository {
       status: 'RECORDED',
       periodCoveredStart: params.periodCoveredStart,
       periodCoveredEnd: params.periodCoveredEnd,
+      externalTransactionRef: params.externalTransactionRef,
       remarks: params.remarks,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

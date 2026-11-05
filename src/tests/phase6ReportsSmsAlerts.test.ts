@@ -393,58 +393,59 @@ export class Phase6TestRunner {
     }
 
     // ==========================================
-    // TEST 10: AUTOMATED EXPIRY NOTIFICATION TRIGGERS
+    // TEST 10: SINGLE OFFICIAL EXPIRY NOTIFICATION POLICY
     // ==========================================
     try {
-      const today = new Date('2026-09-26');
+      const today = new Date('2026-09-26T09:30:00+03:00');
       const policies = [
-        { id: 'p1', saccoAccountNumber: 'NYA-001', expiryDate: '2026-10-10' }, // 14 days
-        { id: 'p2', saccoAccountNumber: 'NYA-002', expiryDate: '2026-10-26' }, // 30 days
-        { id: 'p3', saccoAccountNumber: 'NYA-003', expiryDate: '2026-10-03' }, // 7 days
-        { id: 'p4', saccoAccountNumber: 'NYA-004', expiryDate: '2027-09-26' }, // 365 days (no alert)
+        { id: 'p1', saccoAccountNumber: 'NYA-001', expiryDate: '2026-10-10' }, // 14 days ahead -> SUPPRESSED
+        { id: 'p2', saccoAccountNumber: 'NYA-002', expiryDate: '2026-10-26' }, // 30 days ahead -> SUPPRESSED
+        { id: 'p3', saccoAccountNumber: 'NYA-003', expiryDate: '2026-10-03' }, // 7 days ahead -> SUPPRESSED
+        { id: 'p4', saccoAccountNumber: 'NYA-004', expiryDate: '2026-09-26' }, // EXACT expiry date (today) -> TRIGGERED ONCE
+        { id: 'p5', saccoAccountNumber: 'NYA-005', expiryDate: '2027-09-26' }, // 365 days -> SUPPRESSED
       ];
 
       const triggeredEvents: NotificationEvent[] = [];
       for (const p of policies) {
         const exp = new Date(p.expiryDate);
-        const diffDays = Math.round((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        const diffDays = Math.round((exp.getTime() - new Date('2026-09-26').getTime()) / (1000 * 60 * 60 * 24));
 
+        // Under SACCO policy: advance reminders (diffDays > 0) are strictly suppressed
         let eventType: any = null;
-        if (diffDays === 30) eventType = 'EXPIRY_30_DAYS';
-        else if (diffDays === 14) eventType = 'EXPIRY_14_DAYS';
-        else if (diffDays === 7) eventType = 'EXPIRY_7_DAYS';
+        if (diffDays === 0) {
+          eventType = 'EXPIRY_DUE_TODAY';
+        }
 
         if (eventType) {
           triggeredEvents.push({
             id: `ev-${p.id}`,
             eventType,
-            deduplicationKey: `${eventType}::${p.saccoAccountNumber}::${p.expiryDate}`,
+            deduplicationKey: `PLAN_EXPIRY_AUTO::${p.id}::${p.expiryDate}`,
             saccoAccountNumber: p.saccoAccountNumber,
             branchId: 'br-nya',
             branchName: 'Nyamuyanja Branch',
-            description: `Policy expires in ${diffDays} days`,
-            processed: false,
+            description: `Official expiry notice on policy reaching maturity date ${p.expiryDate}`,
+            processed: true,
             createdAt: today.toISOString(),
           });
         }
       }
 
       const passed =
-        triggeredEvents.length === 3 &&
-        triggeredEvents.some(e => e.eventType === 'EXPIRY_14_DAYS') &&
-        triggeredEvents.some(e => e.eventType === 'EXPIRY_30_DAYS') &&
-        triggeredEvents.some(e => e.eventType === 'EXPIRY_7_DAYS');
+        triggeredEvents.length === 1 &&
+        triggeredEvents[0].saccoAccountNumber === 'NYA-004' &&
+        triggeredEvents[0].eventType === 'EXPIRY_DUE_TODAY';
 
       results.push({
         id: 10,
-        name: 'Automated Policy Expiry Triggers',
+        name: 'Single Official Expiry Notification Policy Enforcement',
         passed,
         message: passed
-          ? 'Automated expiry evaluation accurately detects 30-day, 14-day, and 7-day milestones without false positives'
-          : 'Expiry trigger evaluation discrepancy',
+          ? 'Advance reminders (30d, 14d, 7d) strictly suppressed; exactly one official notification triggered on exact expiry date'
+          : 'Expiry policy enforcement discrepancy',
       });
     } catch (err: any) {
-      results.push({ id: 10, name: 'Automated Policy Expiry Triggers', passed: false, message: err.message });
+      results.push({ id: 10, name: 'Single Official Expiry Notification Policy Enforcement', passed: false, message: err.message });
     }
 
     return results;

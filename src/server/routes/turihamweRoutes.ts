@@ -9,6 +9,7 @@ import {
   PlanReactivationLog,
   ExpiryAlertCategory
 } from '../../types';
+import { calculateUgandaAge, MAX_TURIHAMWE_ELIGIBLE_AGE } from '../../utils/timezone';
 
 export const turihamweRouter = Router();
 
@@ -150,6 +151,76 @@ turihamweRouter.get('/plans/account/:accountNumber', requirePermission('turihamw
   res.json(plan);
 });
 
+/**
+ * POST /api/turihamwe/verify-existing-member
+ * Verifies if an applicant aged 70 or older has an existing Turihamwe membership in the database.
+ * Requirement 3: Searches central database, validates grandfathered eligibility, preserves records, and logs outcome.
+ */
+turihamweRouter.post('/verify-existing-member', requirePermission('turihamwe.view'), (req: AuthenticatedRequest, res: Response) => {
+  const { saccoAccountNumber, dateOfBirth } = req.body;
+  if (!saccoAccountNumber) {
+    return res.status(400).json({ error: 'SACCO account number is required for membership verification.' });
+  }
+
+  const cleanAcc = String(saccoAccountNumber).trim().toUpperCase();
+  const member = serverStore.getMemberByAccountNumber(cleanAcc);
+  if (!member) {
+    return res.status(404).json({
+      error: `Member with SACCO account number '${cleanAcc}' does not exist.`,
+      verified: false,
+    });
+  }
+
+  // Calculate age using member date of birth (or provided dateOfBirth)
+  const dobToUse = dateOfBirth || member.dateOfBirth;
+  const ageRes = calculateUgandaAge(dobToUse);
+
+  // Check for existing Turihamwe membership in central database
+  const existingPlan = serverStore.getPlanByAccountNumber(cleanAcc);
+  const user = req.user!;
+  const branch = req.workingBranch || serverStore.getBranchById(member.branchId) || serverStore.getBranches()[0];
+
+  if (existingPlan) {
+    // Audit log existing member verification outcome
+    AuditService.log({
+      userId: user.id,
+      username: user.username,
+      userFullName: user.fullName,
+      branchId: branch.id,
+      branchName: branch.name,
+      action: 'EXISTING_MEMBER_AGE_VERIFIED',
+      recordType: 'TURIHAMWE_PLAN',
+      recordId: existingPlan.id,
+      newValue: `Verified existing Turihamwe membership for ${member.saccoAccountNumber} (${member.fullName}, Age: ${ageRes.age}y). Grandfathered eligibility confirmed. Existing policy: ${existingPlan.id} (${existingPlan.status}).`,
+      reason: 'Existing Turihamwe membership verified for age-threshold continuation/renewal',
+    });
+
+    return res.status(200).json({
+      success: true,
+      verified: true,
+      member: {
+        saccoAccountNumber: member.saccoAccountNumber,
+        fullName: member.fullName,
+        dateOfBirth: member.dateOfBirth,
+        branchId: member.branchId,
+        branchName: member.branchName,
+        clientStatus: member.clientStatus || 'ALIVE',
+      },
+      plan: existingPlan,
+      age: ageRes.age,
+      message: `Verified: Member ${member.fullName} has historical Turihamwe policy (${existingPlan.id}). Authorised existing-member continuation/renewal permitted under grandfathered policy.`,
+    });
+  }
+
+  // Member exists in SACCO, but has NO Turihamwe history in database
+  return res.status(200).json({
+    success: false,
+    verified: false,
+    age: ageRes.age,
+    error: 'Existing Turihamwe membership could not be verified. Please confirm the SACCO account number and consult an authorised officer.',
+  });
+});
+
 turihamweRouter.post('/plans', requirePermission('turihamwe.register_plan'), (req: AuthenticatedRequest, res: Response) => {
   const {
     saccoAccountNumber,
@@ -213,9 +284,28 @@ turihamweRouter.post('/plans', requirePermission('turihamwe.register_plan'), (re
   const branch = req.workingBranch || serverStore.getBranchById(member.branchId) || serverStore.getBranches()[0];
   const user = req.user!;
 
-  // 6. Support Existing Turihamwe Members (Requirement 2):
-  // If member already has a Turihamwe record, update it seamlessly rather than creating an unintentional duplicate.
+  // 6. Enforce Backend Age Limits & Grandfathered Existing Member Verification (Section 5)
+  // Backend independently checks age and existing plan in database (never trusts unverified frontend flags)
+  const ageRes = calculateUgandaAge(member.dateOfBirth);
+  if (!ageRes.isValid) {
+    return res.status(400).json({
+      error: `Member date of birth validation failed: ${ageRes.error || 'Invalid date of birth'}.`,
+    });
+  }
+
   const existingPlan = serverStore.getPlanByAccountNumber(saccoAccountNumber);
+
+  // Applicants aged 70 or above:
+  // Must have a verified existing Turihamwe membership in the database.
+  // New enrolments for applicants aged 70 or above are strictly rejected.
+  if (ageRes.age >= 70) {
+    if (!existingPlan) {
+      return res.status(400).json({
+        error: 'New Turihamwe enrolment is not permitted for persons aged 70 years or above under the current eligibility policy. Existing Turihamwe members may be verified for continued membership or renewal.',
+      });
+    }
+  }
+
   if (existingPlan) {
     const updatedPlan = serverStore.updatePlan(existingPlan.id, {
       registrationType: resolvedRegType as 'Fresh Registration' | 'Renewal',

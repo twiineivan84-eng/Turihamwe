@@ -1,7 +1,0 @@
-[
-  {
-    "migration_name": "001_initial_production_schema.sql",
-    "checksum": "fb53172a822cc33b8033208510391f270b3768a21d23137c05852d3f720789c9",
-    "applied_at": "2026-10-26T05:07:37.670Z"
-  }
-]

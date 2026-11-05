@@ -20,6 +20,7 @@ import { alertRouter } from './src/server/routes/alertRoutes';
 import { reportRouter } from './src/server/routes/reportRoutes';
 import { systemRouter } from './src/server/routes/systemRoutes';
 import { smsQueueWorker } from './src/server/services/smsQueueWorker';
+import { scheduledBackupWorker } from './src/server/services/scheduledBackupWorker';
 
 dotenv.config();
 
@@ -78,6 +79,9 @@ async function bootstrap() {
 
   // Start background Pandora SMS Queue Worker
   smsQueueWorker.start();
+
+  // Start background Automated Midnight Backup Worker (00:00 Africa/Kampala)
+  scheduledBackupWorker.start();
 
   // Direct authentication endpoints for root and /api shortcuts to prevent any 404s
   app.all(['/login', '/api/login'], (req, res, next) => {
@@ -170,6 +174,11 @@ async function bootstrap() {
         backup: {
           enabled: config.backup.enabled,
           storageConfigured: true,
+          workerStatus: scheduledBackupWorker.isRunning() ? 'RUNNING' : 'STOPPED',
+          scheduleTimeKampala: '00:00 (Midnight EAT / UTC+03:00)',
+          timezone: 'Africa/Kampala',
+          lastBackupFilename: scheduledBackupWorker.getStatus().lastBackupFilename,
+          nextScheduledTimeUganda: scheduledBackupWorker.getStatus().nextScheduledTimeUganda,
         },
         sync: {
           enabled: config.sync.enabled,
@@ -218,6 +227,7 @@ async function bootstrap() {
   const gracefulShutdown = () => {
     console.log('[TURIHAMWE SACCO] Server shutting down, terminating background workers...');
     smsQueueWorker.stop();
+    scheduledBackupWorker.stop();
     server.close(() => {
       process.exit(0);
     });

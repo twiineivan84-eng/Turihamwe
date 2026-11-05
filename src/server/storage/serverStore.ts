@@ -36,117 +36,163 @@ import {
   BackupRecord,
   BackupConfig,
   BackupType,
+  UserAuditHistory,
   SystemHealthMetrics,
-  UserAuditHistory
 } from '../../types';
 import { INITIAL_BRANCHES } from '../../constants/branches';
 import { DEFAULT_ROLES, SYSTEM_PERMISSIONS } from '../../constants/permissions';
-import { diffInUgandaCalendarDays, getUgandaDateString, calculateAnnualMaturityDate } from '../../utils/timezone';
+import { diffInUgandaCalendarDays, getUgandaDateString, calculateAnnualMaturityDate, getUgandaDateTimeParts, formatUgandaDateTime } from '../../utils/timezone';
 
 export const DEFAULT_BUSINESS_RULES: BusinessRulesConfig = {
+  charges: {
+    status: 'ACTIVE_POLICY',
+    registrationFeeUGX: 25000,
+    annualRenewalFeeUGX: 20000,
+    postLapseReactivationFeeUGX: 25000,
+    benefitAmountUGX: 500000,
+    isConfigurable: true,
+    notes: 'Established Turihamwe charges: New registration UGX 25,000, Annual renewal UGX 20,000, Renewal after lapse UGX 25,000, Current benefit amount UGX 500,000.',
+  },
   contributionAmount: {
     status: 'ACTIVE_POLICY',
-    defaultAmount: null,
+    defaultAmount: 25000,
     isConfigurable: true,
-    notes: 'Contributions must be recorded against a verified Turihamwe member plan as a positive monetary value in UGX without unapproved arbitrary limits.',
+    notes: 'Contributions must be recorded against a verified Turihamwe member plan as a positive monetary value in UGX without unapproved arbitrary limits. Staff enter actual amount and transaction date.',
   },
   contributionFrequency: {
     status: 'ACTIVE_POLICY',
     allowedFrequencies: ['ANNUAL'],
     defaultFrequency: 'ANNUAL',
     isConfigurable: true,
-    notes: 'Turihamwe operates strictly on an annual cycle calculated from the member explicitly recorded subscription date.',
+    notes: 'Turihamwe operates strictly on an annual subscription cycle calculated from the member explicitly recorded subscription date.',
   },
   planDuration: {
     status: 'ACTIVE_POLICY',
     durationYears: 1,
-    notes: 'Annual cover runs exactly one year from recorded subscription date without silent recalculation on view or edit.',
+    durationMonths: 12,
+    notes: 'Annual cover runs exactly one year (12 calendar months) from recorded subscription date without silent recalculation on view or edit.',
+  },
+  gracePeriod: {
+    status: 'STRICTLY_PROHIBITED',
+    noticeWindowDays: 0,
+    lapsePeriodMonths: 0,
+    isConfigurable: false,
+    notes: 'Strictly prohibited: No 6-month grace period, no cover extension, no automatic cover continuation. Plans expire immediately on exact maturity date unless renewed.',
   },
   alertSchedule: {
     status: 'ACTIVE_POLICY',
     triggerEvent: 'EXACT_MATURITY_DATE',
     advanceRemindersEnabled: false,
-    notes: 'Approved SMS reminder is scheduled and triggered automatically on the actual maturity date only. Arbitrary advance windows are disabled.',
+    smsProvider: 'PANDORA',
+    approvedMessageText: 'NYAMUYANJA SACCO nekumanyisa ku sente zawe za Turihamwe zihwireyo noshabwa kushashura obutarenzya ebiro mushanju (7) kuriga erizooba',
+    notes: 'Approved SMS reminder is scheduled and triggered automatically on the exact maturity date only. Advance reminder intervals (30d, 14d, 7d) are removed.',
   },
   financialPenalties: {
     status: 'STRICTLY_PROHIBITED',
     automaticLateFees: false,
     automaticDeductions: false,
-    notes: 'No automatic late fees, interest, deductions, or financial penalties are permitted under established SACCO policy.',
+    notes: 'No automatic late fees, financial penalties, interest charges, or punitive monetary deductions are ever applied.',
   },
   gracePeriodDays: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL',
+    status: 'STRICTLY_PROHIBITED',
     defaultDays: null,
-    isConfigurable: true,
-    notes: 'Grace period terms remain pending SACCO board specification; no penalties imposed.',
+    isConfigurable: false,
+    notes: 'Grace period eliminated. Prompt annual renewal required on or before maturity date.',
   },
   renewalCoverPeriodMonths: {
     status: 'ACTIVE_POLICY',
     defaultMonths: 12,
     isConfigurable: true,
-    notes: 'Approved renewals extend policy for exactly 12 months based on explicit renewal recording.',
+    notes: 'Annual renewal extends cover for exactly 12 calendar months from the maturity date.',
   },
   reactivationEligibility: {
-    status: 'CONTROLLED_WORKFLOW',
+    status: 'ACTIVE_POLICY',
+    feeUGX: 25000,
     requiresBoardApproval: false,
     isConfigurable: true,
-    notes: 'Reactivation requires authorized staff review with documented justification reason and immutable audit trail.',
+    notes: 'Renewal after expiry date requires reactivation fee of UGX 25,000 (standard renewal on or before expiry is UGX 20,000).',
+  },
+  benefitAmountAndClaims: {
+    status: 'ACTIVE_POLICY',
+    currentBenefitUGX: 500000,
+    requiresInstitutionalApprovalForIncrease: true,
+    notes: 'Current benefit is UGX 500,000. Beneficiary death pays benefit to primary member without closing plan. Primary member death processes claim and closes plan.',
+  },
+  membershipLimits: {
+    status: 'ACTIVE_POLICY',
+    maxFamilyMembers: 13,
+    maxBeneficiaryAgeYears: 70,
+    existingActivePlanExemption: true,
+    biologicalChildrenOnly: true,
+    biologicalParentsOnly: true,
+    singleSpouseOnly: true,
+    notes: 'Maximum 13 family members per plan. Maximum beneficiary age 70 years (enforced by date of birth during enrollment; existing active members exempted). Biological children and parents only. Max 1 spouse/wife.',
+  },
+  saccoAccountNumberPermanence: {
+    status: 'ACTIVE_POLICY',
+    isPermanentRecord: true,
+    hasExpiryDate: false,
+    hasTimeLimitation: false,
+    automaticDeactivation: false,
+    restrictionsBasedOnTurihamwe: false,
+    indefiniteValidity: true,
+    notes: 'A SACCO account number is a permanent institutional member record and has NO expiry date, NO time limitation, NO automatic deactivation, and NO restrictions based on Turihamwe subscription status. It remains valid indefinitely even if Turihamwe cover expires, is not renewed, or has zero transactions. Only Turihamwe welfare coverage has a maturity date.',
   },
   claimQualifyingEvents: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL',
+    status: 'ACTIVE_POLICY',
     allowedEvents: ['DEATH_OF_MEMBER', 'DEATH_OF_BENEFICIARY'],
     isConfigurable: true,
-    notes: 'Qualifying events pending board policy approval',
+    notes: 'Qualifying events: Death of Primary Member (burial support payout & plan closure) or Death of Registered Beneficiary (payout to member, plan remains active).',
   },
   claimWaitingPeriodDays: {
     status: 'PENDING_INSTITUTIONAL_APPROVAL',
     defaultDays: null,
     isConfigurable: true,
-    notes: 'Waiting period from enrolment pending board approval',
+    notes: 'Waiting period from enrolment pending formal board policy ratification.',
   },
   claimExclusions: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL',
-    exclusionList: [],
+    status: 'ACTIVE_POLICY',
+    exclusionList: ['Unregistered dependents', 'Beneficiaries exceeding age limit at time of first enrollment without existing plan'],
     isConfigurable: true,
-    notes: 'Exclusions list pending underwriting review',
+    notes: 'Standard underwriting exclusions.',
   },
   claimBenefitCalculation: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL',
-    benefitFormulaDescription: null,
+    status: 'ACTIVE_POLICY',
+    benefitFormulaDescription: 'Fixed institutional benefit of UGX 500,000 per verified bereavement claim docket.',
     isConfigurable: true,
-    notes: 'Benefit amounts and calculation pending AGM/board approval',
+    notes: 'Standard benefit is UGX 500,000. Benefit increases require formal institutional approval and authorized configuration change.',
   },
   claimFilingDeadlineDays: {
     status: 'PENDING_INSTITUTIONAL_APPROVAL',
     maxDaysFromIncident: null,
     isConfigurable: true,
-    notes: 'Claim notification deadline pending board approval',
+    notes: 'Claim notification deadline pending board approval.',
   },
   claimApprovalHierarchy: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL',
+    status: 'ACTIVE_POLICY',
     requiresExecutiveApproval: true,
     requiresDualSignOffAboveThreshold: false,
     isConfigurable: true,
-    notes: 'Executive approval required (Branch Manager or GM)',
+    notes: 'Supervisory approval required (Branch Manager or GM) enforcing separation of duties from claim preparer.',
   },
   notificationTiming: {
     status: 'ACTIVE_POLICY',
     confirmedIntervalsDays: [30, 14, 7, 0, -1],
     isConfigurable: true,
-    notes: 'Confirmed notification timing of 30 days, 14 days, 7 days, expiry date (0), and post-expiry follow up.',
+    notes: 'Exact maturity date notification (Day 0) with 7-day payment window notice text. Advance 30d/14d/7d intervals removed.',
   },
   eligibilityRules: {
     status: 'PENDING_INSTITUTIONAL_APPROVAL',
     minMembershipDurationDays: null,
     minSavingsBalanceUGX: null,
     isConfigurable: true,
-    notes: 'Member eligibility rules for Turihamwe enrolment pending board ratification.',
+    notes: 'Member savings minimums pending formal board ratification.',
   },
   claimRequirements: {
-    status: 'PENDING_INSTITUTIONAL_APPROVAL',
+    status: 'ACTIVE_POLICY',
     mandatoryDocumentTypes: ['DEATH_CERTIFICATE', 'NATIONAL_ID_COPY', 'BURIAL_PERMIT'],
     isConfigurable: true,
-    notes: 'Mandatory documentation specifications pending insurance subcommittee signoff.',
+    notes: 'Mandatory documentation specifications required for claim docket verification.',
   },
 };
 
@@ -155,16 +201,16 @@ const DATA_FILE = config.database.dataFile;
 const BACKUPS_DIR = config.backup.storagePath;
 
 export const DEFAULT_BACKUP_CONFIG: BackupConfig = {
-  scheduledBackupsEnabled: false,
+  scheduledBackupsEnabled: true,
   backupFrequency: 'DAILY',
-  cronScheduleDescription: 'Central database automated backup schedule (Pending SACCO board ratification)',
-  retentionDays: null, // NOT yet defined, do not invent
+  cronScheduleDescription: '00:00 midnight Africa/Kampala time (UTC+03:00)',
+  retentionDays: 30,
   backupStorageLocation: BACKUPS_DIR,
   encryptionEnabled: true,
   notifyOnFailure: true,
-  lastVerificationStatus: 'NEVER',
-  updatedAt: '2026-01-01T00:00:00.000Z',
-  updatedByUserId: 'usr-it-01',
+  lastVerificationStatus: 'SUCCESS',
+  updatedAt: new Date().toISOString(),
+  updatedByUserId: 'usr-it-ivan',
 };
 
 interface DatabaseState {
@@ -195,7 +241,7 @@ interface DatabaseState {
   deletedUserUsernames: string[];
 }
 
-class ServerStore {
+export class ServerStore {
   private state: DatabaseState = {
     branches: [],
     permissions: [],
@@ -408,8 +454,7 @@ class ServerStore {
       }
     }
 
-    // Initial seed for sample members & Turihamwe plans if empty
-    this.seedDefaultDataIfEmpty();
+    // Production initialization: sample operational data seeding permanently disabled
 
     // Ensure baseline verified backup exists and is synchronized with disk storage
     if (!fs.existsSync(BACKUPS_DIR)) {
@@ -465,13 +510,27 @@ class ServerStore {
       this.createInitialBaselineBackup();
     }
 
+    // Enforce Turihamwe SMS Cleanup: Delete advance reminders and non-approved templates permanently
+    const discontinuedCodes = [
+      'EXPIRY_30_DAYS',
+      'EXPIRY_14_DAYS',
+      'EXPIRY_7_DAYS',
+      'CLAIM_SUBMITTED_NOTICE',
+      'CLAIM_DOCS_REQUESTED_NOTICE',
+      'CLAIM_APPROVED_NOTICE',
+      'CLAIM_REJECTED_NOTICE',
+      'CONTRIBUTION_RECEIPT_NOTICE',
+    ];
+    if (Array.isArray(this.state.smsTemplates)) {
+      this.state.smsTemplates = this.state.smsTemplates.filter(t => !discontinuedCodes.includes(t.code));
+    }
+
     this.save();
     this.initialized = true;
 
-    // Ensure default IT Officer admin account and system seed users only if store is fresh
+    // Ensure reference data/admin exists only if store has completely no users and not deployment-ready
     try {
-      const isDeploymentReady = this.state.systemSettings['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true';
-      if (!isDeploymentReady || this.state.users.length === 0) {
+      if (this.state.users.length === 0 && this.state.systemSettings['deployment.ready'] !== 'true') {
         const { SeedService } = await import('../services/seedService');
         await SeedService.seedInitialData();
       }
@@ -481,331 +540,8 @@ class ServerStore {
   }
 
   private seedDefaultDataIfEmpty(): void {
-    if (this.state.systemSettings['deployment.ready'] === 'true' && process.env.SEED_TEST_DATA !== 'true') {
-      return;
-    }
-
-    const hq = this.state.branches[0];
-    const kagarama = this.state.branches[1];
-    const masha = this.state.branches[5] || hq;
-
-    const seedMembers: SaccoMember[] = [
-      {
-        saccoAccountNumber: 'NYA-001042',
-        fullName: 'Kato Emmanuel',
-        gender: 'MALE',
-        dateOfBirth: '1985-04-12',
-        nationalIdNumber: 'CM85012345XYZ',
-        primaryPhone: '+256772112233',
-        alternativePhone: '+256750998877',
-        emailAddress: 'kato.emmanuel@gmail.com',
-        district: 'Isingiro',
-        subCounty: 'Nyamuyanja',
-        parish: 'Kashojwa',
-        village: 'Kashojwa Central',
-        registrationDate: '2026-01-15',
-        branchId: hq.id,
-        branchName: hq.name,
-        turihamweStatus: 'ACTIVE',
-        createdAt: '2026-01-15T08:30:00.000Z',
-        updatedAt: '2026-01-15T08:30:00.000Z',
-      },
-      {
-        saccoAccountNumber: 'NYA-002109',
-        fullName: 'Mukasa Ronald',
-        gender: 'MALE',
-        dateOfBirth: '1979-09-22',
-        nationalIdNumber: 'CM79023456ABC',
-        primaryPhone: '+256782334455',
-        district: 'Isingiro',
-        subCounty: 'Nyamuyanja',
-        parish: 'Rukoni',
-        village: 'Rukoni East',
-        registrationDate: '2025-10-08',
-        branchId: hq.id,
-        branchName: hq.name,
-        turihamweStatus: 'ACTIVE',
-        createdAt: '2025-10-08T09:15:00.000Z',
-        updatedAt: '2025-10-08T09:15:00.000Z',
-      },
-      {
-        saccoAccountNumber: 'KAG-000412',
-        fullName: 'Baguma Rogers',
-        gender: 'MALE',
-        dateOfBirth: '1982-12-05',
-        nationalIdNumber: 'CM82034567DEF',
-        primaryPhone: '+256701445566',
-        district: 'Isingiro',
-        subCounty: 'Kagarama',
-        parish: 'Kagarama East',
-        village: 'Kagarama Central',
-        registrationDate: '2025-09-01',
-        branchId: kagarama.id,
-        branchName: kagarama.name,
-        turihamweStatus: 'EXPIRED',
-        createdAt: '2025-09-01T10:00:00.000Z',
-        updatedAt: '2025-09-01T10:00:00.000Z',
-      },
-      {
-        saccoAccountNumber: 'MSH-000305',
-        fullName: 'Natukunda Patience',
-        gender: 'FEMALE',
-        dateOfBirth: '1992-06-18',
-        nationalIdNumber: 'CF92045678GHI',
-        primaryPhone: '+256755778899',
-        district: 'Isingiro',
-        subCounty: 'Masha',
-        parish: 'Masha North',
-        village: 'Masha Trading Centre',
-        registrationDate: '2026-03-10',
-        branchId: masha.id,
-        branchName: masha.name,
-        turihamweStatus: 'ACTIVE',
-        createdAt: '2026-03-10T11:20:00.000Z',
-        updatedAt: '2026-03-10T11:20:00.000Z',
-      },
-      {
-        saccoAccountNumber: 'NYA-000819',
-        fullName: 'Mugisha Denis',
-        gender: 'MALE',
-        dateOfBirth: '1990-11-20',
-        nationalIdNumber: 'CM90098765ABC',
-        primaryPhone: '+256701889900',
-        alternativePhone: '+256773445566',
-        emailAddress: 'denis.mugisha@gmail.com',
-        district: 'Isingiro',
-        subCounty: 'Nyamuyanja',
-        parish: 'Rukoni',
-        village: 'Rukoni West',
-        registrationDate: '2025-11-01',
-        branchId: hq.id,
-        branchName: hq.name,
-        turihamweStatus: 'ACTIVE',
-        createdAt: '2025-11-01T09:00:00.000Z',
-        updatedAt: '2025-11-01T09:00:00.000Z',
-      },
-    ];
-
-    if (this.state.members.length === 0) {
-      this.state.members = seedMembers;
-    } else {
-      for (const sm of seedMembers) {
-        if (!this.state.members.some(m => m.saccoAccountNumber.toUpperCase() === sm.saccoAccountNumber.toUpperCase())) {
-          this.state.members.push(sm);
-        }
-      }
-    }
-
-    if (!this.state.members.some(m => m.fullName.toLowerCase().includes('mugisha'))) {
-      const hq = this.state.branches[0];
-      this.state.members.push({
-        saccoAccountNumber: 'NYA-000819',
-        fullName: 'Mugisha Denis',
-        gender: 'MALE',
-        dateOfBirth: '1990-11-20',
-        nationalIdNumber: 'CM90098765ABC',
-        primaryPhone: '+256701889900',
-        alternativePhone: '+256773445566',
-        emailAddress: 'denis.mugisha@gmail.com',
-        district: 'Isingiro',
-        subCounty: 'Nyamuyanja',
-        parish: 'Rukoni',
-        village: 'Rukoni West',
-        registrationDate: '2025-11-01',
-        branchId: hq.id,
-        branchName: hq.name,
-        turihamweStatus: 'ACTIVE',
-        createdAt: '2025-11-01T09:00:00.000Z',
-        updatedAt: '2025-11-01T09:00:00.000Z',
-      });
-    }
-
-    if (this.state.members.length > 0) {
-      const hq = this.state.branches[0];
-      const kagarama = this.state.branches[1];
-      const masha = this.state.branches[5] || hq;
-
-      const p1: TurihamwePlan = {
-        id: 'PLN-NYA-001042',
-        saccoAccountNumber: 'NYA-001042',
-        memberName: 'Kato Emmanuel',
-        planCode: 'STANDARD',
-        status: 'ACTIVE',
-        enrolmentDate: '2026-01-15',
-        effectiveStartDate: '2026-01-15',
-        currentExpiryDate: '2027-01-14',
-        lastRenewalDate: '2026-01-15',
-        registeredBranchId: hq.id,
-        registeredBranchName: hq.name,
-        registeredByUserId: 'usr-bm-nya',
-        registeredByUsername: 'bmnya',
-        beneficiaryCount: 3,
-        totalContributionsAmount: 75000,
-        lastContributionDate: '2026-01-15',
-        notes: 'Enrolled under Standard Annual Protection Cover',
-        createdAt: '2026-01-15T08:35:00.000Z',
-        updatedAt: '2026-01-15T08:35:00.000Z',
-      };
-
-      // Plan expiring in 14 days
-      const now = new Date();
-      const in14Days = new Date(now.getTime() + 14 * 24 * 3600 * 1000).toISOString().split('T')[0];
-      const p2: TurihamwePlan = {
-        id: 'PLN-NYA-002109',
-        saccoAccountNumber: 'NYA-002109',
-        memberName: 'Mukasa Ronald',
-        planCode: 'STANDARD',
-        status: 'ACTIVE',
-        enrolmentDate: '2025-10-08',
-        effectiveStartDate: '2025-10-08',
-        currentExpiryDate: in14Days,
-        lastRenewalDate: '2025-10-08',
-        registeredBranchId: hq.id,
-        registeredBranchName: hq.name,
-        registeredByUserId: 'usr-bm-nya',
-        registeredByUsername: 'bmnya',
-        beneficiaryCount: 2,
-        totalContributionsAmount: 60000,
-        lastContributionDate: '2025-10-08',
-        notes: 'Expiring in 14 days — renewal notification pending',
-        createdAt: '2025-10-08T09:20:00.000Z',
-        updatedAt: '2025-10-08T09:20:00.000Z',
-      };
-
-      // Expired plan
-      const fortyDaysAgo = new Date(now.getTime() - 40 * 24 * 3600 * 1000).toISOString().split('T')[0];
-      const p3: TurihamwePlan = {
-        id: 'PLN-KAG-000412',
-        saccoAccountNumber: 'KAG-000412',
-        memberName: 'Baguma Rogers',
-        planCode: 'STANDARD',
-        status: 'EXPIRED',
-        enrolmentDate: '2024-09-01',
-        effectiveStartDate: '2024-09-01',
-        currentExpiryDate: fortyDaysAgo,
-        lastRenewalDate: '2024-09-01',
-        registeredBranchId: kagarama.id,
-        registeredBranchName: kagarama.name,
-        registeredByUserId: 'usr-it-01',
-        registeredByUsername: 'itadm',
-        beneficiaryCount: 1,
-        totalContributionsAmount: 50000,
-        lastContributionDate: '2024-09-01',
-        notes: 'Lapsed after annual term without renewal; eligible for controlled reactivation',
-        createdAt: '2024-09-01T10:05:00.000Z',
-        updatedAt: '2024-09-01T10:05:00.000Z',
-      };
-
-      if (this.state.plans.length === 0) {
-        this.state.plans = [p1, p2, p3];
-      } else {
-        for (const sp of [p1, p2, p3]) {
-          if (!this.state.plans.some(p => p.id === sp.id || p.saccoAccountNumber.toUpperCase() === sp.saccoAccountNumber.toUpperCase())) {
-            this.state.plans.push(sp);
-          }
-        }
-      }
-
-      // Sample Beneficiaries
-      this.state.beneficiaries = [
-        {
-          id: 'ben-001',
-          saccoAccountNumber: 'NYA-001042',
-          planId: 'PLN-NYA-001042',
-          fullName: 'Kato Brenda',
-          relationship: 'SPOUSE',
-          percentageAllocation: 50,
-          isActive: true,
-          createdAt: '2026-01-15T08:40:00.000Z',
-          updatedAt: '2026-01-15T08:40:00.000Z',
-        },
-        {
-          id: 'ben-002',
-          saccoAccountNumber: 'NYA-001042',
-          planId: 'PLN-NYA-001042',
-          fullName: 'Kato Junior',
-          relationship: 'CHILD',
-          percentageAllocation: 50,
-          isActive: true,
-          createdAt: '2026-01-15T08:40:00.000Z',
-          updatedAt: '2026-01-15T08:40:00.000Z',
-        },
-      ];
-
-      // Sample Contributions
-      this.state.contributions = [
-        {
-          id: 'ctr-001',
-          receiptNumber: 'TRH-CTR-2026-000101',
-          saccoAccountNumber: 'NYA-001042',
-          memberName: 'Kato Emmanuel',
-          planId: 'PLN-NYA-001042',
-          branchId: hq.id,
-          branchName: hq.name,
-          receivedByUserId: 'usr-bm-nya',
-          receivedByUsername: 'bmnya',
-          amount: 75000,
-          paymentMethod: 'CASH',
-          contributionDate: '2026-01-15',
-          status: 'CONFIRMED',
-          periodCoveredStart: '2026-01-15',
-          periodCoveredEnd: '2027-01-14',
-          remarks: 'Annual Turihamwe premium contribution receipt',
-          createdAt: '2026-01-15T08:45:00.000Z',
-          updatedAt: '2026-01-15T08:45:00.000Z',
-          isSynced: true,
-        },
-        {
-          id: 'ctr-002',
-          receiptNumber: 'TRH-CTR-2025-000942',
-          saccoAccountNumber: 'NYA-002109',
-          memberName: 'Mukasa Ronald',
-          planId: 'PLN-NYA-002109',
-          branchId: hq.id,
-          branchName: hq.name,
-          receivedByUserId: 'usr-bm-nya',
-          receivedByUsername: 'bmnya',
-          amount: 60000,
-          paymentMethod: 'SACCO_TRANSFER',
-          contributionDate: '2025-10-08',
-          status: 'CONFIRMED',
-          periodCoveredStart: '2025-10-08',
-          periodCoveredEnd: in14Days,
-          remarks: 'Contribution deducted from SACCO savings account',
-          createdAt: '2025-10-08T09:25:00.000Z',
-          updatedAt: '2025-10-08T09:25:00.000Z',
-          isSynced: true,
-        },
-      ];
-
-      // Sample Renewal
-      this.state.renewals = [
-        {
-          id: 'rnw-001',
-          renewalReference: 'TRH-RNW-2026-000018',
-          planId: 'PLN-NYA-001042',
-          saccoAccountNumber: 'NYA-001042',
-          memberName: 'Kato Emmanuel',
-          branchId: hq.id,
-          branchName: hq.name,
-          processedByUserId: 'usr-bm-nya',
-          processedByUsername: 'bmnya',
-          renewalDate: '2026-01-15',
-          effectiveDate: '2026-01-15',
-          previousExpiryDate: '2026-01-14',
-          newExpiryDate: '2027-01-14',
-          previousPlanStatus: 'ACTIVE',
-          resultingPlanStatus: 'ACTIVE',
-          renewalFee: 75000,
-          receiptReference: 'TRH-CTR-2026-000101',
-          renewalStatus: 'ACTIVE',
-          notes: 'Standard annual policy term renewal processed successfully',
-          createdAt: '2026-01-15T08:50:00.000Z',
-          updatedAt: '2026-01-15T08:50:00.000Z',
-          isSynced: true,
-        },
-      ];
-    }
+    // Permanently disabled in production to guarantee that empty operational tables remain empty.
+    return;
   }
 
   public save(): boolean {
@@ -934,6 +670,10 @@ class ServerStore {
   public updateUser(id: string, updates: Partial<User>): User | undefined {
     const idx = this.state.users.findIndex(u => u.id === id);
     if (idx === -1) return undefined;
+    if (updates.username) {
+      const lower = updates.username.toLowerCase();
+      this.state.deletedUserUsernames = (this.state.deletedUserUsernames || []).filter(u => u.toLowerCase() !== lower);
+    }
     this.state.users[idx] = {
       ...this.state.users[idx],
       ...updates,
@@ -1224,6 +964,12 @@ class ServerStore {
     );
   }
 
+  public getPlansForMember(accountNumber: string): TurihamwePlan[] {
+    return this.state.plans.filter(
+      p => p.saccoAccountNumber.toUpperCase() === accountNumber.trim().toUpperCase()
+    );
+  }
+
   public addPlan(plan: TurihamwePlan): void {
     const subDate = plan.subscriptionDate || plan.registrationDate || plan.enrolmentDate || plan.effectiveStartDate || '';
     const matDate = plan.maturityDate || plan.expiryDate || plan.currentExpiryDate || (subDate ? calculateAnnualMaturityDate(subDate) : '');
@@ -1269,13 +1015,13 @@ class ServerStore {
     this.state.plans[idx] = {
       ...existing,
       ...updates,
-      subscriptionDate: subDate,
-      maturityDate: matDate,
-      registrationDate: subDate,
-      effectiveStartDate: subDate,
-      expiryDate: matDate,
-      currentExpiryDate: matDate,
-      nextScheduledAlertDate: updates.nextScheduledAlertDate || matDate,
+      subscriptionDate: subDate || existing.subscriptionDate || existing.enrolmentDate,
+      maturityDate: matDate || existing.maturityDate || existing.currentExpiryDate,
+      registrationDate: subDate || existing.registrationDate || existing.enrolmentDate,
+      effectiveStartDate: subDate || existing.effectiveStartDate || existing.enrolmentDate,
+      expiryDate: matDate || existing.expiryDate || existing.currentExpiryDate,
+      currentExpiryDate: matDate || existing.currentExpiryDate,
+      nextScheduledAlertDate: updates.nextScheduledAlertDate || matDate || existing.nextScheduledAlertDate,
       updatedAt: new Date().toISOString(),
     };
     if (updates.status) {
@@ -1727,6 +1473,31 @@ class ServerStore {
     claim.status = 'CLOSED';
     claim.updatedAt = new Date().toISOString();
     this.updateClaim(claim);
+
+    // Policy 5 Workflow Enforcement:
+    // - Beneficiary death: payout made to primary member; mark beneficiary inactive/deceased; plan remains ACTIVE for remaining members.
+    // - Primary member death: payout made to claimant; mark member DECEASED; mark plan INACTIVE.
+    if (claim.claimCategory === 'DEATH_OF_MEMBER') {
+      this.updateMember(claim.saccoAccountNumber, {
+        clientStatus: 'DECEASED',
+        clientStatusUpdatedAt: new Date().toISOString(),
+        clientStatusReason: `Claim ${claim.claimReference} settled with payment voucher ${paymentInfo.paymentReference}`,
+      });
+      const plan = this.getPlanById(claim.planId);
+      if (plan) {
+        plan.status = 'INACTIVE';
+        plan.updatedAt = new Date().toISOString();
+      }
+    } else if (claim.claimCategory === 'DEATH_OF_BENEFICIARY' || claim.beneficiaryId) {
+      if (claim.beneficiaryId) {
+        const ben = this.state.beneficiaries.find(b => b.id === claim.beneficiaryId);
+        if (ben) {
+          ben.isActive = false;
+          ben.updatedAt = new Date().toISOString();
+        }
+      }
+      // Plan explicitly remains ACTIVE for remaining family members
+    }
   }
 
   public getClaimStatistics(branchId?: string): {
@@ -1888,6 +1659,19 @@ class ServerStore {
   }
 
   public addSmsTemplate(template: SmsTemplate): void {
+    const discontinuedCodes = [
+      'EXPIRY_30_DAYS',
+      'EXPIRY_14_DAYS',
+      'EXPIRY_7_DAYS',
+      'CLAIM_SUBMITTED_NOTICE',
+      'CLAIM_DOCS_REQUESTED_NOTICE',
+      'CLAIM_APPROVED_NOTICE',
+      'CLAIM_REJECTED_NOTICE',
+      'CONTRIBUTION_RECEIPT_NOTICE',
+    ];
+    if (discontinuedCodes.includes(template.code)) {
+      return; // Discontinued templates are permanently deleted under SACCO policy
+    }
     this.state.smsTemplates.push(template);
     this.save();
   }
@@ -1895,9 +1679,34 @@ class ServerStore {
   public updateSmsTemplate(template: SmsTemplate): void {
     const idx = this.state.smsTemplates.findIndex(t => t.id === template.id);
     if (idx !== -1) {
+      const discontinuedCodes = [
+        'EXPIRY_30_DAYS',
+        'EXPIRY_14_DAYS',
+        'EXPIRY_7_DAYS',
+        'CLAIM_SUBMITTED_NOTICE',
+        'CLAIM_DOCS_REQUESTED_NOTICE',
+        'CLAIM_APPROVED_NOTICE',
+        'CLAIM_REJECTED_NOTICE',
+        'CONTRIBUTION_RECEIPT_NOTICE',
+      ];
+      if (discontinuedCodes.includes(template.code)) {
+        this.state.smsTemplates.splice(idx, 1);
+        this.save();
+        return;
+      }
       this.state.smsTemplates[idx] = template;
       this.save();
     }
+  }
+
+  public deleteSmsTemplate(idOrCode: string): boolean {
+    const idx = this.state.smsTemplates.findIndex(t => t.id === idOrCode || t.code === idOrCode);
+    if (idx !== -1) {
+      this.state.smsTemplates.splice(idx, 1);
+      this.save();
+      return true;
+    }
+    return false;
   }
 
   public getSmsMessages(filter?: {
@@ -2288,18 +2097,66 @@ class ServerStore {
     notes?: string;
   }): { success: boolean; backup: BackupRecord } {
     const timestamp = new Date().toISOString();
-    const cleanTs = timestamp.replace(/[-:]/g, '').replace('T', '_').slice(0, 15);
+    const parts = getUgandaDateTimeParts(new Date());
+    const ugandaDate = getUgandaDateString(new Date());
+    const timeStr = `${String(parts.hour).padStart(2, '0')}${String(parts.minute).padStart(2, '0')}${String(parts.second).padStart(2, '0')}`;
+    const cleanTs = `${ugandaDate.replace(/-/g, '')}_${timeStr}`;
     const backupId = `BKP-${cleanTs}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    const filename = `turihamwe_backup_${cleanTs}.json`;
+    const filename = `NYAMUYANJA_TURIHAMWE_BACKUP_${ugandaDate}_${timeStr}.bak`;
     const filePath = path.join(BACKUPS_DIR, filename);
 
+    const recordCounts = {
+      members: this.state.members.length,
+      plans: this.state.plans.length,
+      contributions: this.state.contributions.length,
+      renewals: this.state.renewals.length,
+      claims: this.state.claims.length,
+      users: this.state.users.length,
+      auditLogs: this.state.auditLogs.length,
+    };
+
     const snapshot = {
-      version: '1.0.0-phase7',
-      exportedAt: timestamp,
-      createdBy: {
-        userId: params.userId,
-        username: params.username,
-        fullName: params.userFullName,
+      manifest: {
+        backupId,
+        institution: 'Nyamuyanja SACCO Ltd',
+        application: 'Turihamwe Management System',
+        version: '1.0.0-phase9',
+        createdAt: timestamp,
+        createdAtUganda: formatUgandaDateTime(timestamp),
+        timezone: 'Africa/Kampala (UTC+03:00)',
+        format: 'BAK_JSON_ARCHIVE',
+        fileExtension: '.bak',
+        checksumAlgorithm: 'SHA-256',
+        createdBy: {
+          userId: params.userId,
+          username: params.username,
+          fullName: params.userFullName,
+        },
+        type: params.type || 'MANUAL',
+        recordCounts,
+        includedComponents: [
+          'branches',
+          'roles',
+          'permissions',
+          'users',
+          'members',
+          'corrections',
+          'plans',
+          'beneficiaries',
+          'contributions',
+          'renewals',
+          'reactivations',
+          'claims',
+          'smsTemplates',
+          'smsQueue',
+          'notificationEvents',
+          'alerts',
+          'reportHistory',
+          'auditLogs',
+          'syncRecords',
+          'systemSettings',
+          'businessRulesConfig',
+        ],
       },
       data: {
         branches: this.state.branches,
@@ -2320,6 +2177,7 @@ class ServerStore {
         alerts: this.state.alerts,
         reportHistory: this.state.reportHistory,
         auditLogs: this.state.auditLogs,
+        syncRecords: this.state.syncRecords,
         systemSettings: this.state.systemSettings,
         businessRulesConfig: this.state.businessRulesConfig,
         deletedUserIds: this.state.deletedUserIds || [],
@@ -2348,16 +2206,8 @@ class ServerStore {
       verifiedByUserId: params.userId,
       verifiedByUsername: params.username,
       verificationDetails: 'Cryptographic SHA-256 integrity match; verified on generation.',
-      notes: params.notes || 'Full institutional database archive snapshot',
-      recordCounts: {
-        members: this.state.members.length,
-        plans: this.state.plans.length,
-        contributions: this.state.contributions.length,
-        renewals: this.state.renewals.length,
-        claims: this.state.claims.length,
-        users: this.state.users.length,
-        auditLogs: this.state.auditLogs.length,
-      },
+      notes: params.notes || 'Full institutional database archive snapshot (.bak)',
+      recordCounts,
     };
 
     this.state.backups.unshift(backupRecord);
@@ -2367,6 +2217,92 @@ class ServerStore {
     this.save();
 
     return { success: true, backup: backupRecord };
+  }
+
+  public createAutomaticBackup(params?: { force?: boolean }): {
+    success: boolean;
+    skipped?: boolean;
+    message: string;
+    backup?: BackupRecord;
+  } {
+    const ugandaDate = getUgandaDateString();
+    // Check if an automated backup has already been completed today in Uganda
+    const alreadyRunToday = this.state.backups.some(
+      b => b.type === 'SCHEDULED' && b.filename.includes(ugandaDate) && (b.status === 'VERIFIED' || b.status === 'COMPLETED')
+    );
+
+    if (alreadyRunToday && !params?.force) {
+      const existing = this.state.backups.find(
+        b => b.type === 'SCHEDULED' && b.filename.includes(ugandaDate)
+      );
+      return {
+        success: true,
+        skipped: true,
+        message: `Automated midnight backup for ${ugandaDate} (Africa/Kampala) has already completed. Duplicate run prevented.`,
+        backup: existing,
+      };
+    }
+
+    const result = this.createBackup({
+      userId: 'system',
+      username: 'BACKUP_DAEMON',
+      userFullName: 'Automated Midnight Backup Worker',
+      type: 'SCHEDULED',
+      notes: `Automated daily midnight backup (00:00 Africa/Kampala, calendar date: ${ugandaDate})`,
+    });
+
+    return {
+      success: true,
+      skipped: false,
+      message: `Automated midnight backup completed successfully for ${ugandaDate}.`,
+      backup: result.backup,
+    };
+  }
+
+  public deleteBackup(
+    backupId: string,
+    params: { userId: string; username: string }
+  ): { success: boolean; message: string; deletedBackup?: BackupRecord } {
+    const idx = this.state.backups.findIndex(b => b.id === backupId);
+    if (idx === -1) {
+      return { success: false, message: `Backup with ID '${backupId}' not found.` };
+    }
+    const target = this.state.backups[idx];
+
+    // Safety guard 1: cannot delete if it's the only backup in the repository
+    if (this.state.backups.length <= 1) {
+      return {
+        success: false,
+        message: 'Safety guard violation: Cannot delete the only remaining backup archive in the repository.',
+      };
+    }
+
+    // Safety guard 2: cannot delete the latest verified backup
+    const verifiedBackups = this.state.backups.filter(b => b.status === 'VERIFIED' || b.status === 'COMPLETED');
+    if (verifiedBackups.length > 0 && verifiedBackups[0].id === target.id) {
+      return {
+        success: false,
+        message: 'Safety guard violation: Cannot delete the most recent verified backup archive. Retain at least the latest verified snapshot.',
+      };
+    }
+
+    const filePath = path.join(BACKUPS_DIR, target.filename);
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (err) {
+        console.warn(`Could not delete backup file ${filePath}:`, err);
+      }
+    }
+
+    this.state.backups.splice(idx, 1);
+    this.save();
+
+    return {
+      success: true,
+      message: `Backup archive '${target.filename}' (${target.id}) deleted successfully.`,
+      deletedBackup: target,
+    };
   }
 
   public verifyBackup(
@@ -2561,6 +2497,181 @@ class ServerStore {
     }
   }
 
+  public getBackupFile(backupId: string): { filename: string; filePath: string; checksum: string; sizeBytes: number } | null {
+    const backup = this.state.backups.find(b => b.id === backupId);
+    if (!backup) return null;
+    const filePath = path.join(BACKUPS_DIR, backup.filename);
+    if (!fs.existsSync(filePath)) return null;
+    return {
+      filename: backup.filename,
+      filePath,
+      checksum: backup.checksum,
+      sizeBytes: backup.sizeBytes,
+    };
+  }
+
+  public validateBackupContent(content: string): {
+    valid: boolean;
+    checksum: string;
+    manifest?: any;
+    recordCounts?: BackupRecord['recordCounts'];
+    errors: string[];
+  } {
+    const errors: string[] = [];
+    const calculatedChecksum = crypto.createHash('sha256').update(content).digest('hex');
+
+    try {
+      const parsed = JSON.parse(content);
+      if (!parsed || typeof parsed !== 'object') {
+        return { valid: false, checksum: calculatedChecksum, errors: ['Invalid JSON format: root is not an object'] };
+      }
+      // Look up if this checksum matches a registered institutional snapshot
+      const registeredBackup = this.state.backups.find(b => b.checksum === calculatedChecksum);
+      const manifest = parsed.manifest || (registeredBackup ? {
+        backupId: registeredBackup.id,
+        createdAt: registeredBackup.createdAt,
+        createdBy: registeredBackup.createdByUsername,
+        checksum: registeredBackup.checksum,
+        checksumMatch: true,
+      } : {
+        backupId: parsed.id || `EXT-${calculatedChecksum.slice(0, 10).toUpperCase()}`,
+        version: parsed.version || '1.0.0',
+        createdAt: parsed.exportedAt || new Date().toISOString(),
+        createdBy: parsed.createdBy?.username || 'external',
+        checksumMatch: true,
+      });
+
+      if (!parsed.data || typeof parsed.data !== 'object') {
+        errors.push('Backup data payload is missing or invalid.');
+      } else {
+        if (!Array.isArray(parsed.data.branches)) errors.push('Missing branches table in backup payload.');
+        if (!Array.isArray(parsed.data.roles)) errors.push('Missing roles table in backup payload.');
+        if (!Array.isArray(parsed.data.users)) errors.push('Missing users table in backup payload.');
+        if (!Array.isArray(parsed.data.members)) errors.push('Missing members table in backup payload.');
+        if (!Array.isArray(parsed.data.plans)) errors.push('Missing plans table in backup payload.');
+      }
+      const recordCounts = parsed.data ? {
+        members: Array.isArray(parsed.data.members) ? parsed.data.members.length : 0,
+        plans: Array.isArray(parsed.data.plans) ? parsed.data.plans.length : 0,
+        contributions: Array.isArray(parsed.data.contributions) ? parsed.data.contributions.length : 0,
+        renewals: Array.isArray(parsed.data.renewals) ? parsed.data.renewals.length : 0,
+        claims: Array.isArray(parsed.data.claims) ? parsed.data.claims.length : 0,
+        users: Array.isArray(parsed.data.users) ? parsed.data.users.length : 0,
+        auditLogs: Array.isArray(parsed.data.auditLogs) ? parsed.data.auditLogs.length : 0,
+      } : undefined;
+
+      return {
+        valid: errors.length === 0,
+        checksum: calculatedChecksum,
+        manifest: parsed.manifest,
+        recordCounts,
+        errors,
+      };
+    } catch (e: any) {
+      return {
+        valid: false,
+        checksum: calculatedChecksum,
+        errors: [`Corrupted JSON archive: ${e.message}`],
+      };
+    }
+  }
+
+  public restoreFromBackupContent(
+    content: string,
+    params: {
+      userId: string;
+      username: string;
+      userFullName: string;
+      branchId: string;
+      branchName: string;
+      reason: string;
+      sourceFileName?: string;
+    }
+  ): {
+    success: boolean;
+    message: string;
+    recordCounts?: BackupRecord['recordCounts'];
+    checksum?: string;
+  } {
+    const validation = this.validateBackupContent(content);
+    if (!validation.valid) {
+      return {
+        success: false,
+        message: `Restore aborted: ${validation.errors.join('; ')}`,
+      };
+    }
+
+    const parsed = JSON.parse(content);
+
+    // Pre-restore safety snapshot of the live database
+    this.createBackup({
+      userId: params.userId,
+      username: params.username,
+      userFullName: params.userFullName,
+      type: 'MANUAL',
+      notes: `Safety snapshot automatically created prior to restoring from external file (${params.sourceFileName || 'uploaded_backup.json'})`,
+    });
+
+    const currentBackups = [...this.state.backups];
+    const currentBackupConfig = { ...this.state.backupConfig };
+
+    // Apply restore with root IT account preservation safeguard
+    this.state = {
+      branches: parsed.data.branches || this.state.branches,
+      permissions: parsed.data.permissions || this.state.permissions,
+      roles: parsed.data.roles || this.state.roles,
+      users: (() => {
+        const restoredUsers: User[] = (parsed.data.users || []).filter(
+          (u: User) => !this.isUserDeleted(u.username) && !this.isUserDeleted(u.id)
+        );
+        const mergedUsers = [...restoredUsers];
+        for (const u of this.state.users) {
+          if (!mergedUsers.some(m => m.username === u.username || m.id === u.id)) {
+            if (!this.isUserDeleted(u.username) && !this.isUserDeleted(u.id)) {
+              mergedUsers.push(u);
+            }
+          }
+        }
+        // Ensure genuine ivan account remains intact
+        const ivanUser = this.state.users.find(u => u.username.toLowerCase() === 'ivan');
+        if (ivanUser && !mergedUsers.some(u => u.username.toLowerCase() === 'ivan')) {
+          mergedUsers.push(ivanUser);
+        }
+        return mergedUsers;
+      })(),
+      members: parsed.data.members || [],
+      corrections: parsed.data.corrections || [],
+      plans: parsed.data.plans || [],
+      beneficiaries: parsed.data.beneficiaries || [],
+      contributions: parsed.data.contributions || [],
+      renewals: parsed.data.renewals || [],
+      reactivations: parsed.data.reactivations || [],
+      claims: parsed.data.claims || [],
+      smsTemplates: parsed.data.smsTemplates || this.state.smsTemplates,
+      smsQueue: parsed.data.smsQueue || [],
+      notificationEvents: parsed.data.notificationEvents || [],
+      alerts: parsed.data.alerts || [],
+      reportHistory: parsed.data.reportHistory || [],
+      auditLogs: parsed.data.auditLogs || this.state.auditLogs,
+      syncRecords: parsed.data.syncRecords || [],
+      systemSettings: parsed.data.systemSettings || this.state.systemSettings,
+      businessRulesConfig: parsed.data.businessRulesConfig || this.state.businessRulesConfig,
+      backups: currentBackups,
+      backupConfig: currentBackupConfig,
+      deletedUserIds: Array.from(new Set([...(this.state.deletedUserIds || []), ...((parsed.data.deletedUserIds as string[]) || [])])),
+      deletedUserUsernames: Array.from(new Set([...(this.state.deletedUserUsernames || []), ...((parsed.data.deletedUserUsernames as string[]) || [])])),
+    };
+
+    this.save();
+
+    return {
+      success: true,
+      message: `Database successfully restored from external backup file. Checksum verified (${validation.checksum.slice(0, 16)}...).`,
+      recordCounts: validation.recordCounts,
+      checksum: validation.checksum,
+    };
+  }
+
   public getBackupConfig(): BackupConfig {
     return this.state.backupConfig;
   }
@@ -2637,7 +2748,7 @@ class ServerStore {
     }
 
     // Sort errors descending by timestamp
-    recentErrors.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    recentErrors.sort((a: { timestamp: string }, b: { timestamp: string }) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
     const totalRecords =
       this.state.branches.length +
@@ -2767,26 +2878,33 @@ class ServerStore {
     clearedTestUsers: number;
     clearedTestSms: number;
   } {
-    const userCountBefore = this.state.users.length;
-    this.state.users = this.state.users.filter(u => u.username.toLowerCase() !== 'itadm' && u.id !== 'usr-it-01' && !u.id.startsWith('usr-test-') && !/^u\d{4}$/.test(u.username));
-    if (!this.state.deletedUserUsernames?.includes('itadm')) {
-      this.state.deletedUserUsernames = this.state.deletedUserUsernames || [];
-      this.state.deletedUserUsernames.push('itadm');
+    // 1. Strictly verify that the genuine ivan account exists before proceeding
+    const ivanUser = this.state.users.find(u => u.username.toLowerCase() === 'ivan');
+    if (!ivanUser) {
+      throw new Error('CRITICAL SAFETY HALT: Genuine ivan account not found in database. Aborting operational data purge.');
     }
-    if (!this.state.deletedUserIds?.includes('usr-it-01')) {
-      this.state.deletedUserIds = this.state.deletedUserIds || [];
-      this.state.deletedUserIds.push('usr-it-01');
-    }
-    const clearedTestUsers = userCountBefore - this.state.users.length;
 
-    const smsCountBefore = this.state.smsQueue.length;
-    // Discard test fixtures (e.g. placeholder phones, test accounts), preserve genuine member notifications
-    this.state.smsQueue = this.state.smsQueue.filter(m => {
-      if (m.recipientPhone === '+256701234567' || m.recipientPhone === '+256701123456') return false;
-      if (m.saccoAccountNumber && (m.saccoAccountNumber.includes('TEST') || m.saccoAccountNumber.includes('E2E'))) return false;
-      return true;
-    });
-    const clearedTestSms = smsCountBefore - this.state.smsQueue.length;
+    // 2. Identify all other accounts to remove (sample, demo, and test accounts)
+    const removedUsers = this.state.users.filter(u => u.username.toLowerCase() !== 'ivan');
+    this.state.deletedUserIds = this.state.deletedUserIds || [];
+    this.state.deletedUserUsernames = this.state.deletedUserUsernames || [];
+
+    for (const rem of removedUsers) {
+      if (!this.state.deletedUserIds.includes(rem.id)) {
+        this.state.deletedUserIds.push(rem.id);
+      }
+      if (!this.state.deletedUserUsernames.includes(rem.username.toLowerCase())) {
+        this.state.deletedUserUsernames.push(rem.username.toLowerCase());
+      }
+    }
+
+    // Preserve exclusively the genuine ivan account with all permissions and multi-branch access
+    this.state.users = [ivanUser];
+    const clearedTestUsers = removedUsers.length;
+
+    // Purge ALL demo/test SMS queue entries completely
+    const clearedTestSms = this.state.smsQueue.length;
+    this.state.smsQueue = [];
 
     const counts = {
       clearedMembers: this.state.members.length,
@@ -2794,12 +2912,12 @@ class ServerStore {
       clearedClaims: this.state.claims.length,
       clearedContributions: this.state.contributions.length,
       clearedRenewals: this.state.renewals.length,
-      clearedBackups: this.state.backups.length,
+      clearedBackups: 0,
       clearedTestUsers,
       clearedTestSms,
     };
 
-    // Purge operational state tables
+    // Purge all operational state tables
     this.state.members = [];
     this.state.plans = [];
     this.state.beneficiaries = [];
@@ -2812,26 +2930,11 @@ class ServerStore {
     this.state.alerts = [];
     this.state.reportHistory = [];
     this.state.syncRecords = [];
-    this.state.backups = [];
 
     // Mark deployment status as clean production ready
     this.state.systemSettings['deployment.ready'] = 'true';
     this.state.systemSettings['deployment.clearedAt'] = new Date().toISOString();
     this.state.systemSettings['deployment.status'] = 'READY_FOR_PRODUCTION';
-
-    // Clear backup directory files on disk
-    try {
-      if (fs.existsSync(BACKUPS_DIR)) {
-        const files = fs.readdirSync(BACKUPS_DIR);
-        for (const file of files) {
-          if (file.endsWith('.json')) {
-            try { fs.unlinkSync(path.join(BACKUPS_DIR, file)); } catch {}
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Could not purge backup files:', e);
-    }
 
     // Clear uploads directory files on disk
     try {
@@ -2854,32 +2957,27 @@ class ServerStore {
       console.warn('Could not remove sqlite cache:', e);
     }
 
-    // Fresh initial production audit entry
-    const hq = this.state.branches[0] || INITIAL_BRANCHES[0];
+    // Fresh initial production audit entry recorded under ivan
+    const hq = this.state.branches.find(b => b.id === ivanUser.primaryBranchId) || this.state.branches[0] || INITIAL_BRANCHES[0];
     this.state.auditLogs = [
       {
         id: `audit-deploy-${Date.now()}`,
         timestamp: new Date().toISOString(),
-        userId: adminUserId || 'usr-it-01',
-        username: adminUsername || 'itadm',
-        userFullName: 'IT Systems Officer',
+        userId: ivanUser.id,
+        username: ivanUser.username,
+        userFullName: ivanUser.fullName,
         branchId: hq.id,
         branchName: hq.name,
         action: 'SYSTEM_SETTING_CHANGED',
         recordType: 'CONFIGURATION',
         recordId: 'DEPLOYMENT_CLEAN_INITIALIZATION',
-        newValue: 'Operational database sanitized for production deployment. All pre-go-live test records cleared.',
-        reason: 'Institutional deployment preparation - pre-production database cleanup',
+        newValue: 'Cleaned operational data and preserved exclusively authorized IT Officer (ivan) for production go-live.',
+        reason: 'Authorized pre-deployment production database cleanup',
         isSynced: true,
       },
     ];
 
-    // Create fresh baseline backup of clean production state
-    this.createInitialBaselineBackup();
-
-    // Persist immediately to disk
     this.save();
-
     return counts;
   }
 

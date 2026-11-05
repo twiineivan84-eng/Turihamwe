@@ -4,6 +4,7 @@ import { serverStore } from '../storage/serverStore';
 import { AuditService } from '../services/auditService';
 import { BusinessRulesConfig, BackupConfig } from '../../types';
 import { PandoraSmsService } from '../services/pandoraSmsService';
+import { scheduledBackupWorker } from '../services/scheduledBackupWorker';
 
 export const systemRouter = Router();
 
@@ -139,6 +140,22 @@ systemRouter.get(
   }
 );
 
+// Get scheduled backup worker status
+systemRouter.get(
+  '/backups/scheduled-status',
+  requireAuth,
+  requirePermission('audit.manage_backups'),
+  (_req: AuthenticatedRequest, res: Response) => {
+    try {
+      const status = scheduledBackupWorker.getStatus();
+      res.json({ success: true, data: status });
+    } catch (err) {
+      console.error('Failed to get scheduled backup status:', err);
+      res.status(500).json({ success: false, message: 'Failed to retrieve scheduled backup status.' });
+    }
+  }
+);
+
 // Trigger manual backup
 systemRouter.post(
   '/backups',
@@ -267,6 +284,183 @@ systemRouter.post(
     } catch (err) {
       console.error('Database restore exception:', err);
       res.status(500).json({ success: false, message: 'Critical failure during restore procedure.' });
+    }
+  }
+);
+
+// Download backup archive directly to local client (Priority 1)
+systemRouter.get(
+  '/backups/:id/download',
+  requireAuth,
+  requirePermission('audit.manage_backups'),
+  (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const backupId = req.params.id;
+      const fileInfo = serverStore.getBackupFile(backupId);
+
+      if (!fileInfo) {
+        res.status(404).json({ success: false, message: 'Requested backup archive file was not found on server storage.' });
+        return;
+      }
+
+      AuditService.log({
+        userId: req.user!.id,
+        username: req.user!.username,
+        userFullName: req.user!.fullName,
+        branchId: req.workingBranch!.id,
+        branchName: req.workingBranch!.name,
+        action: 'BACKUP_DOWNLOADED',
+        recordType: 'BACKUP',
+        recordId: backupId,
+        newValue: `Downloaded backup archive ${fileInfo.filename} (${(fileInfo.sizeBytes / 1024).toFixed(1)} KB, SHA-256: ${fileInfo.checksum.slice(0, 16)}...)`,
+        reason: 'Authorized IT Officer local backup download',
+      });
+
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileInfo.filename}"`);
+      res.setHeader('X-Backup-Checksum', fileInfo.checksum);
+      res.setHeader('X-Backup-Size', fileInfo.sizeBytes.toString());
+      res.download(fileInfo.filePath, fileInfo.filename);
+    } catch (err) {
+      console.error('Backup download error:', err);
+      res.status(500).json({ success: false, message: 'Failed to stream backup archive file.' });
+    }
+  }
+);
+
+// Delete old backup archive (IT Officer restricted, protected against deleting only/latest backup)
+systemRouter.delete(
+  '/backups/:id',
+  requireAuth,
+  requirePermission('audit.manage_backups'),
+  (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const backupId = req.params.id;
+      const result = serverStore.deleteBackup(backupId, {
+        userId: req.user!.id,
+        username: req.user!.username,
+      });
+
+      if (!result.success) {
+        res.status(400).json({ success: false, message: result.message });
+        return;
+      }
+
+      AuditService.log({
+        userId: req.user!.id,
+        username: req.user!.username,
+        userFullName: req.user!.fullName,
+        branchId: req.workingBranch!.id,
+        branchName: req.workingBranch!.name,
+        action: 'BACKUP_DELETED',
+        recordType: 'BACKUP',
+        recordId: backupId,
+        newValue: `Deleted backup archive ${result.deletedBackup?.filename || backupId} from repository storage.`,
+        reason: 'Authorized administrator backup maintenance purge',
+      });
+
+      res.json({
+        success: true,
+        message: result.message,
+        data: result.deletedBackup,
+      });
+    } catch (err) {
+      console.error('Delete backup error:', err);
+      res.status(500).json({ success: false, message: 'Failed to delete backup archive.' });
+    }
+  }
+);
+
+// Validate uploaded backup archive integrity before restoration (Priority 2)
+systemRouter.post(
+  '/backups/validate-upload',
+  requireAuth,
+  requirePermission('audit.manage_backups'),
+  (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { content } = req.body;
+      if (!content || typeof content !== 'string') {
+        res.status(400).json({ success: false, message: 'Backup file payload content is required.' });
+        return;
+      }
+
+      const validation = serverStore.validateBackupContent(content);
+      res.json({
+        success: validation.valid,
+        data: validation,
+      });
+    } catch (err) {
+      console.error('Validate upload error:', err);
+      res.status(500).json({ success: false, message: 'Failed to parse and validate backup file.' });
+    }
+  }
+);
+
+// Restore central database from uploaded/downloaded backup file (Priority 2)
+systemRouter.post(
+  '/backups/restore-upload',
+  requireAuth,
+  requirePermission('audit.manage_backups'),
+  (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { content, reason, confirmationAcknowledged, filename } = req.body;
+
+      if (!confirmationAcknowledged) {
+        res.status(400).json({
+          success: false,
+          message: 'Restore operation requires explicit administrator safety confirmation.',
+        });
+        return;
+      }
+
+      if (!reason || reason.trim().length < 10) {
+        res.status(400).json({
+          success: false,
+          message: 'A mandatory justification reason (min 10 characters) is required for database recovery operations.',
+        });
+        return;
+      }
+
+      if (!content || typeof content !== 'string') {
+        res.status(400).json({
+          success: false,
+          message: 'Valid JSON backup file content is required for file-based restoration.',
+        });
+        return;
+      }
+
+      const result = serverStore.restoreFromBackupContent(content, {
+        userId: req.user!.id,
+        username: req.user!.username,
+        userFullName: req.user!.fullName,
+        branchId: req.workingBranch!.id,
+        branchName: req.workingBranch!.name,
+        reason: reason.trim(),
+        sourceFileName: filename || 'uploaded_backup.json',
+      });
+
+      if (!result.success) {
+        res.status(400).json(result);
+        return;
+      }
+
+      AuditService.log({
+        userId: req.user!.id,
+        username: req.user!.username,
+        userFullName: req.user!.fullName,
+        branchId: req.workingBranch!.id,
+        branchName: req.workingBranch!.name,
+        action: 'BACKUP_RESTORED',
+        recordType: 'BACKUP',
+        recordId: result.checksum || 'UPLOADED_FILE',
+        newValue: `Restored database from external backup file ${filename || 'uploaded_backup.json'} (${result.checksum ? result.checksum.slice(0, 16) + '...' : ''}). Justification: ${reason}`,
+        reason: reason.trim(),
+      });
+
+      res.json(result);
+    } catch (err) {
+      console.error('File restoration exception:', err);
+      res.status(500).json({ success: false, message: 'Critical failure during file-based restoration procedure.' });
     }
   }
 );

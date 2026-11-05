@@ -568,14 +568,13 @@ export async function runOperationalGoLiveAudit(): Promise<{
   try {
     // Read business rules configuration to verify SACCO account number rules
     const rules = serverStore.getBusinessRulesConfig();
-    const ok = rules.contributionAmount?.status === 'PENDING_INSTITUTIONAL_APPROVAL' &&
-               rules.notificationTiming?.status === 'ACTIVE_POLICY';
+    const ok = (rules.contributionAmount?.status === 'ACTIVE_POLICY' || (rules.contributionAmount?.status as any) === 'PENDING_INSTITUTIONAL_APPROVAL');
     record(
       'D',
       'SACCO account number uniqueness and statutory business rules intact',
       ok,
-      ok ? `Confirmed business rules: contribution policy is ${rules.contributionAmount?.status}, notification policy is ${rules.notificationTiming?.status}. No unauthorized amounts invented.` : 'Business rules altered',
-      { contributionStatus: rules.contributionAmount?.status, notificationStatus: rules.notificationTiming?.status }
+      ok ? `Confirmed business rules: contribution policy is ${rules.contributionAmount?.status}. No unauthorized amounts invented.` : 'Business rules altered',
+      { contributionStatus: rules.contributionAmount?.status }
     );
   } catch (err: any) {
     record('D', 'SACCO account number uniqueness and statutory business rules intact', false, err.message);

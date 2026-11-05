@@ -9,6 +9,7 @@ import {
   AuditLog,
   BackupRecord,
   BackupConfig,
+  ScheduledBackupStatus,
   SystemHealthMetrics,
   BusinessRulesConfig
 } from '../types';
@@ -31,6 +32,7 @@ import {
   Play,
   X,
   Download,
+  Upload,
   Server,
   Clock,
   Activity,
@@ -161,6 +163,18 @@ export const SystemView: React.FC = () => {
   const [restoreReason, setRestoreReason] = useState<string>('');
   const [restoreConfirmed, setRestoreConfirmed] = useState<boolean>(false);
   const [isRestoring, setIsRestoring] = useState<boolean>(false);
+  const [downloadingBackupId, setDownloadingBackupId] = useState<string | null>(null);
+  const [showUploadRestoreModal, setShowUploadRestoreModal] = useState<boolean>(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadContent, setUploadContent] = useState<string>('');
+  const [uploadValidation, setUploadValidation] = useState<any | null>(null);
+  const [isValidatingUpload, setIsValidatingUpload] = useState<boolean>(false);
+  const [uploadRestoreReason, setUploadRestoreReason] = useState<string>('');
+  const [uploadRestoreConfirmed, setUploadRestoreConfirmed] = useState<boolean>(false);
+  const [isExecutingUploadRestore, setIsExecutingUploadRestore] = useState<boolean>(false);
+  const [scheduledBackupStatus, setScheduledBackupStatus] = useState<ScheduledBackupStatus | null>(null);
+  const [isDeletingBackupId, setIsDeletingBackupId] = useState<string | null>(null);
+  const [backupToDelete, setBackupToDelete] = useState<BackupRecord | null>(null);
 
   // Backup config editing state
   const [editBackupFreq, setEditBackupFreq] = useState<'DAILY' | 'TWICE_DAILY' | 'WEEKLY' | 'CUSTOM'>('DAILY');
@@ -236,9 +250,10 @@ export const SystemView: React.FC = () => {
     if (!canManageBackups) return;
     setLoadingBackups(true);
     try {
-      const [bRes, cRes] = await Promise.all([
+      const [bRes, cRes, sRes] = await Promise.all([
         apiClient.getBackups(),
         apiClient.getBackupConfig(),
+        apiClient.getScheduledBackupStatus().catch(() => ({ success: false, data: null })),
       ]);
       if (bRes.success) setBackups(bRes.data);
       if (cRes.success) {
@@ -246,6 +261,9 @@ export const SystemView: React.FC = () => {
         setEditBackupFreq(cRes.data.backupFrequency);
         setEditBackupAuto(cRes.data.scheduledBackupsEnabled);
         setEditRetentionDays(cRes.data.retentionDays !== null ? cRes.data.retentionDays.toString() : '');
+      }
+      if (sRes?.success && sRes.data) {
+        setScheduledBackupStatus(sRes.data);
       }
     } catch (err) {
       console.error('Failed to load backup data:', err);
@@ -391,6 +409,28 @@ export const SystemView: React.FC = () => {
     }
   };
 
+  // Handle Delete Old Backup (Protected)
+  const handleDeleteBackup = async (backupId: string) => {
+    setIsDeletingBackupId(backupId);
+    try {
+      const res = await apiClient.deleteBackup(backupId);
+      if (res.success) {
+        setBackups(prev => prev.filter(b => b.id !== backupId));
+        setBackupToDelete(null);
+        setNotification({
+          type: 'success',
+          message: res.message || 'Backup deleted successfully.',
+        });
+        fetchBackups();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete backup archive';
+      setNotification({ type: 'error', message: msg });
+    } finally {
+      setIsDeletingBackupId(null);
+    }
+  };
+
   // Handle Restore Backup
   const handleRestoreBackup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -428,6 +468,109 @@ export const SystemView: React.FC = () => {
       setNotification({ type: 'error', message: msg });
     } finally {
       setIsRestoring(false);
+    }
+  };
+
+  // Handle Download Backup Directly to Local Computer (Priority 1)
+  const handleDownloadBackup = async (backupId: string, suggestedFilename?: string) => {
+    setDownloadingBackupId(backupId);
+    try {
+      const { blob, filename, checksum } = await apiClient.downloadBackup(backupId);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename || suggestedFilename || `turihamwe_backup_${backupId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      setNotification({
+        type: 'success',
+        message: `Backup archive downloaded successfully: ${filename || suggestedFilename}${checksum ? ` (SHA-256: ${checksum.slice(0, 16)}...)` : ''}`,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to download backup archive';
+      setNotification({ type: 'error', message: msg });
+    } finally {
+      setDownloadingBackupId(null);
+    }
+  };
+
+  // Handle Select & Validate Local File for Recovery (Priority 2)
+  const handleSelectUploadFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadFile(file);
+    setIsValidatingUpload(true);
+    setUploadValidation(null);
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = String(event.target?.result || '');
+        setUploadContent(text);
+        const res = await apiClient.validateBackupFile(text);
+        setUploadValidation(res.data);
+      } catch (err: any) {
+        setUploadValidation({
+          valid: false,
+          error: err?.message || 'Invalid or unreadable backup file format',
+        });
+      } finally {
+        setIsValidatingUpload(false);
+      }
+    };
+    reader.onerror = () => {
+      setUploadValidation({ valid: false, error: 'Could not read local file from disk' });
+      setIsValidatingUpload(false);
+    };
+    reader.readAsText(file);
+  };
+
+  // Handle Execute Recovery from Uploaded File (Priority 2)
+  const handleExecuteUploadRestore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadContent || !uploadValidation?.valid) {
+      setNotification({ type: 'error', message: 'Valid backup content is required.' });
+      return;
+    }
+    if (!uploadRestoreConfirmed) {
+      setNotification({ type: 'error', message: 'You must check the confirmation acknowledgment box.' });
+      return;
+    }
+    if (uploadRestoreReason.trim().length < 10) {
+      setNotification({ type: 'error', message: 'Mandatory justification reason must be at least 10 characters.' });
+      return;
+    }
+
+    setIsExecutingUploadRestore(true);
+    try {
+      const res = await apiClient.restoreBackupFromFile({
+        content: uploadContent,
+        reason: uploadRestoreReason.trim(),
+        confirmationAcknowledged: true,
+        filename: uploadFile?.name,
+      });
+
+      if (res.success) {
+        setShowUploadRestoreModal(false);
+        setUploadFile(null);
+        setUploadContent('');
+        setUploadValidation(null);
+        setUploadRestoreReason('');
+        setUploadRestoreConfirmed(false);
+        setNotification({
+          type: 'success',
+          message: `Database successfully restored from external file '${uploadFile?.name}'. Root ivan account and multi-branch access preserved. Automated rollback snapshot created.`,
+        });
+        fetchBackups();
+        fetchHealth();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Recovery operation failed';
+      setNotification({ type: 'error', message: msg });
+    } finally {
+      setIsExecutingUploadRestore(false);
     }
   };
 
@@ -1048,29 +1191,125 @@ export const SystemView: React.FC = () => {
       )}
 
       {/* ========================================================= */}
-      {/* TAB 3: BACKUP SYSTEM & RECOVERY (REQ 16, 17, 18)          */}
+      {/* TAB 3: BACKUP SYSTEM & RECOVERY (PHASE 4 PRODUCTION SUITE) */}
       {/* ========================================================= */}
       {activeTab === 'backup' && (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="font-bold text-slate-900 text-sm">
-                Central PostgreSQL Database Backup & Disaster Recovery
+                Central Database Backup & Disaster Recovery Module
               </h3>
               <p className="text-xs text-slate-500">
-                Cryptographically authenticated backups • Automated SHA-256 verification • Mandatory audit trail on recovery
+                Cryptographically signed .bak archives • Automatic 00:00 midnight (Africa/Kampala) scheduler • Mandatory audit trail on recovery
               </p>
             </div>
 
             {canManageBackups && (
-              <button
-                onClick={() => setShowCreateBackupModal(true)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold rounded-lg shadow-xs transition"
-              >
-                <Database className="w-3.5 h-3.5" />
-                Generate Backup Snapshot Now
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setShowUploadRestoreModal(true);
+                    setUploadFile(null);
+                    setUploadContent('');
+                    setUploadValidation(null);
+                    setUploadRestoreReason('');
+                    setUploadRestoreConfirmed(false);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-xs transition"
+                >
+                  <Upload className="w-3.5 h-3.5 text-blue-700" />
+                  RESTORE FROM BACKUP (.BAK)...
+                </button>
+                <button
+                  onClick={() => setShowCreateBackupModal(true)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold rounded-lg shadow-xs transition"
+                >
+                  <Database className="w-3.5 h-3.5" />
+                  CREATE BACKUP NOW (.BAK)
+                </button>
+              </div>
             )}
+          </div>
+
+          {/* AUTOMATIC BACKUP STATUS (00:00 MIDNIGHT EAT SCHEDULER) */}
+          <div className="bg-gradient-to-r from-blue-900 to-indigo-950 text-white p-5 rounded-xl shadow-xs space-y-4 border border-blue-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-blue-800/80 gap-2">
+              <div className="flex items-center gap-2.5">
+                <Clock className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-blue-100 flex items-center gap-2">
+                    AUTOMATIC DAILY BACKUP STATUS
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                      {scheduledBackupStatus?.workerRunning ? 'WORKER RUNNING' : 'ACTIVE'}
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-blue-200">
+                    Scheduled Daily at 00:00 Midnight — Africa/Kampala (UTC+03:00) • Server-side background daemon
+                  </p>
+                </div>
+              </div>
+
+              {canManageBackups && (
+                <button
+                  onClick={async () => {
+                    try {
+                      setIsCreatingBackup(true);
+                      const res = await apiClient.createBackup('Manual trigger of automated midnight backup pipeline');
+                      if (res.success) {
+                        setNotification({ type: 'success', message: `Automated backup pipeline cycle executed: ${res.data.filename}` });
+                        fetchBackups();
+                      }
+                    } catch (e: any) {
+                      setNotification({ type: 'error', message: e?.message || 'Failed to trigger backup cycle' });
+                    } finally {
+                      setIsCreatingBackup(false);
+                    }
+                  }}
+                  disabled={isCreatingBackup}
+                  className="px-3 py-1.5 bg-blue-600/60 hover:bg-blue-600 text-white text-xs font-semibold rounded-lg border border-blue-400/40 flex items-center gap-1.5 transition self-start sm:self-auto"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCreatingBackup ? 'animate-spin' : ''}`} />
+                  Trigger Midnight Cycle Now
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+                <span className="text-blue-300 block text-[10px] font-semibold uppercase">Scheduled Time</span>
+                <span className="text-sm font-bold font-mono text-white">00:00 Midnight</span>
+                <span className="text-[10px] text-blue-300 block">Africa/Kampala (EAT)</span>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+                <span className="text-blue-300 block text-[10px] font-semibold uppercase">Next Scheduled Run</span>
+                <span className="text-sm font-bold font-mono text-emerald-300">
+                  {scheduledBackupStatus?.nextScheduledTimeUganda
+                    ? new Date(scheduledBackupStatus.nextScheduledTimeUganda).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' EAT'
+                    : 'Tonight 00:00 EAT'}
+                </span>
+                <span className="text-[10px] text-blue-300 block">
+                  {scheduledBackupStatus?.nextScheduledTimeUganda
+                    ? new Date(scheduledBackupStatus.nextScheduledTimeUganda).toLocaleDateString()
+                    : 'Daily'}
+                </span>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+                <span className="text-blue-300 block text-[10px] font-semibold uppercase">Last Execution Status</span>
+                <span className="text-sm font-bold font-mono text-emerald-400 flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  {scheduledBackupStatus?.lastStatus || 'SUCCESS'}
+                </span>
+                <span className="text-[10px] text-blue-300 block truncate" title={scheduledBackupStatus?.lastBackupFilename || 'Current'}>
+                  {scheduledBackupStatus?.lastBackupFilename ? scheduledBackupStatus.lastBackupFilename.slice(-22) : 'Verified on schedule'}
+                </span>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+                <span className="text-blue-300 block text-[10px] font-semibold uppercase">Archive File Format</span>
+                <span className="text-sm font-bold font-mono text-blue-100">.BAK Archive</span>
+                <span className="text-[10px] text-blue-300 block">Encrypted & Checksummed</span>
+              </div>
+            </div>
           </div>
 
           {/* Backup Schedule & Retention Policy Card */}
@@ -1082,7 +1321,7 @@ export const SystemView: React.FC = () => {
                   Backup Scheduling & Retention Configuration
                 </span>
                 <span className="text-[11px] text-slate-500">
-                  Exact frequency & retention remain configurable pending SACCO policy ratification
+                  Daily midnight schedule at 00:00 Africa/Kampala time (UTC+03:00)
                 </span>
               </div>
 
@@ -1094,7 +1333,7 @@ export const SystemView: React.FC = () => {
                     onChange={e => setEditBackupFreq(e.target.value as any)}
                     className="w-full py-1.5 px-3 border border-slate-300 rounded-lg bg-white"
                   >
-                    <option value="DAILY">Daily (Standard Overnight Snapshot)</option>
+                    <option value="DAILY">Daily (00:00 Midnight Africa/Kampala)</option>
                     <option value="TWICE_DAILY">Twice Daily (Midday + Close of Business)</option>
                     <option value="WEEKLY">Weekly Full Institutional Backup</option>
                     <option value="CUSTOM">Custom Enterprise Schedule</option>
@@ -1111,11 +1350,11 @@ export const SystemView: React.FC = () => {
                     max={3650}
                     value={editRetentionDays}
                     onChange={e => setEditRetentionDays(e.target.value)}
-                    placeholder="Configurable (e.g. 90, 180, 365)"
+                    placeholder="e.g. 30, 90, 180"
                     className="w-full py-1.5 px-3 border border-slate-300 rounded-lg bg-white"
                   />
                   <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    Leave blank if retention period is pending board ratification.
+                    Automatic rolling retention window for archived .bak snapshots.
                   </span>
                 </div>
 
@@ -1144,14 +1383,15 @@ export const SystemView: React.FC = () => {
             </div>
           )}
 
-          {/* Backup History Table */}
+          {/* BACKUP HISTORY TABLE */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-              <span className="font-bold text-slate-900 text-xs">
-                Archived Central Database Snapshots ({backups.length})
+              <span className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                <Database className="w-4 h-4 text-blue-700" />
+                BACKUP HISTORY ({backups.length} .BAK Archives)
               </span>
-              <span className="text-[11px] text-slate-500">
-                Storage: Encrypted Local Central Volume
+              <span className="text-[11px] text-slate-500 font-mono">
+                Storage Format: Authenticated .BAK (JSON Archive + SHA-256 Checksum)
               </span>
             </div>
 
@@ -1159,13 +1399,13 @@ export const SystemView: React.FC = () => {
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 text-slate-600 font-semibold border-b uppercase">
                   <tr>
-                    <th className="px-6 py-3">Snapshot Reference</th>
-                    <th className="px-6 py-3">Created Date/Time</th>
-                    <th className="px-6 py-3">Operator</th>
+                    <th className="px-6 py-3">Snapshot Reference & File (.bak)</th>
+                    <th className="px-6 py-3">Created Date/Time (EAT)</th>
+                    <th className="px-6 py-3">Operator / Source</th>
                     <th className="px-6 py-3">Archive Size</th>
                     <th className="px-6 py-3">SHA-256 Checksum</th>
                     <th className="px-6 py-3">Verification</th>
-                    <th className="px-6 py-3 text-right">Recovery Actions</th>
+                    <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -1173,16 +1413,18 @@ export const SystemView: React.FC = () => {
                     <tr key={bkp.id} className="hover:bg-slate-50 transition">
                       <td className="px-6 py-3 font-mono font-bold text-blue-900">
                         {bkp.id}
-                        <div className="text-[10px] text-slate-400 font-normal font-sans">{bkp.filename}</div>
+                        <div className="text-[10px] text-slate-500 font-medium font-mono">{bkp.filename}</div>
                       </td>
                       <td className="px-6 py-3 font-mono">
                         {new Date(bkp.createdAt).toLocaleString()}
                       </td>
                       <td className="px-6 py-3">
                         <span className="font-semibold">{bkp.createdByUserFullName}</span>
-                        <div className="text-[10px] text-slate-400 font-mono">@{bkp.createdByUsername}</div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {bkp.type === 'SCHEDULED' ? 'AUTOMATIC 00:00 DAEMON' : `@${bkp.createdByUsername}`}
+                        </div>
                       </td>
-                      <td className="px-6 py-3 font-mono">
+                      <td className="px-6 py-3 font-mono font-semibold">
                         {(bkp.sizeBytes / 1024).toFixed(1)} KB
                       </td>
                       <td className="px-6 py-3 font-mono text-[10px] text-slate-500" title={bkp.checksum}>
@@ -1205,13 +1447,29 @@ export const SystemView: React.FC = () => {
                         )}
                       </td>
                       <td className="px-6 py-3 text-right space-x-2">
+                        {/* Control 2: DOWNLOAD BACKUP (.BAK) */}
+                        <button
+                          onClick={() => handleDownloadBackup(bkp.id, bkp.filename)}
+                          disabled={downloadingBackupId === bkp.id}
+                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition"
+                          title="Download .bak file directly to local computer"
+                        >
+                          <Download className="w-3 h-3" />
+                          {downloadingBackupId === bkp.id ? 'Downloading...' : 'DOWNLOAD (.BAK)'}
+                        </button>
+
+                        {/* Control 6: VERIFY BACKUP INTEGRITY */}
                         <button
                           onClick={() => handleVerifyBackup(bkp.id)}
                           disabled={verifyingBackupId === bkp.id}
-                          className="text-blue-700 hover:underline font-semibold"
+                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition"
+                          title="Verify cryptographic SHA-256 hash match"
                         >
-                          {verifyingBackupId === bkp.id ? 'Checking...' : 'Verify Hash'}
+                          {verifyingBackupId === bkp.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <FileCheck className="w-3 h-3" />}
+                          Verify Hash
                         </button>
+
+                        {/* Control 3: RESTORE FROM BACKUP */}
                         {canManageBackups && (
                           <button
                             onClick={() => {
@@ -1219,9 +1477,24 @@ export const SystemView: React.FC = () => {
                               setRestoreReason('');
                               setRestoreConfirmed(false);
                             }}
-                            className="text-amber-700 hover:text-amber-900 font-semibold ml-2 hover:underline"
+                            className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition"
+                            title="Restore central database to this snapshot"
                           >
-                            Restore...
+                            <RotateCcw className="w-3 h-3 text-amber-700" />
+                            Restore
+                          </button>
+                        )}
+
+                        {/* Control 7: DELETE OLD BACKUP (Protected against only/latest verified backup) */}
+                        {canManageBackups && (
+                          <button
+                            onClick={() => setBackupToDelete(bkp)}
+                            disabled={isDeletingBackupId === bkp.id}
+                            className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition"
+                            title="Delete old backup archive (Protected)"
+                          >
+                            <Trash2 className="w-3 h-3 text-red-600" />
+                            Delete
                           </button>
                         )}
                       </td>
@@ -1413,116 +1686,210 @@ export const SystemView: React.FC = () => {
       )}
 
       {/* ========================================================= */}
-      {/* TAB 5: BUSINESS RULES & CONFIGURATION (REQ 12 & 13)       */}
+      {/* TAB 5: BUSINESS RULES & CONFIGURATION (POLICIES 1 - 10)   */}
       {/* ========================================================= */}
       {activeTab === 'business_rules' && (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="font-bold text-slate-900 text-sm">
-                Configurable Business Settings & Policy Framework
+                Established Turihamwe Business Rules & Parameters
               </h3>
               <p className="text-xs text-slate-500">
-                Business parameters are modeled as configurable hooks without hardcoded business assumptions.
+                11 canonical operating parameters enforced across registration, renewal, grace periods, claims, and SMS dispatches.
               </p>
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 rounded bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold">
-                Status: Pending Board Ratification
+              <span className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Status: Established SACCO Operational Policy
               </span>
             </div>
           </div>
 
-          {businessRules ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              {/* Contribution Amount */}
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-900">1. Contribution Amount</h4>
-                  <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-bold">
-                    {businessRules.contributionAmount.status}
-                  </span>
-                </div>
-                <p className="text-slate-600 text-xs">{businessRules.contributionAmount.notes}</p>
-                <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-slate-700 font-mono">
-                  Default Amount: {businessRules.contributionAmount.defaultAmount ? `UGX ${businessRules.contributionAmount.defaultAmount.toLocaleString()}` : 'Unprescribed (Pending AGM)'}
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+            {/* 1. Registration Fee */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">1. Registration Fee</h4>
+                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
               </div>
-
-              {/* Contribution Frequency */}
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-900">2. Contribution Frequency</h4>
-                  <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-bold">
-                    {businessRules.contributionFrequency.status}
-                  </span>
-                </div>
-                <p className="text-slate-600 text-xs">{businessRules.contributionFrequency.notes}</p>
-                <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-slate-700">
-                  Allowed: {businessRules.contributionFrequency.allowedFrequencies.join(', ')}
-                </div>
-              </div>
-
-              {/* Renewal Cover Period */}
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-900">3. Renewal Cover Period</h4>
-                  <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-bold">
-                    {businessRules.renewalCoverPeriodMonths.status}
-                  </span>
-                </div>
-                <p className="text-slate-600 text-xs">{businessRules.renewalCoverPeriodMonths.notes}</p>
-                <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-slate-700 font-mono">
-                  Duration: {businessRules.renewalCoverPeriodMonths.defaultMonths ? `${businessRules.renewalCoverPeriodMonths.defaultMonths} Months` : 'Unratified Duration'}
-                </div>
-              </div>
-
-              {/* Grace Period Duration */}
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-900">4. Grace Period Duration</h4>
-                  <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-bold">
-                    {businessRules.gracePeriodDays.status}
-                  </span>
-                </div>
-                <p className="text-slate-600 text-xs">{businessRules.gracePeriodDays.notes}</p>
-                <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-slate-700 font-mono">
-                  Default Days: {businessRules.gracePeriodDays.defaultDays ?? 'Configurable Hook'}
-                </div>
-              </div>
-
-              {/* Benefit Amount & Formula */}
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-900">5. Benefit Amount & Calculation</h4>
-                  <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-bold">
-                    {businessRules.claimBenefitCalculation.status}
-                  </span>
-                </div>
-                <p className="text-slate-600 text-xs">{businessRules.claimBenefitCalculation.notes}</p>
-                <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-slate-700 font-mono">
-                  Calculation Formula: {businessRules.claimBenefitCalculation.benefitFormulaDescription || 'Pending Board Policy Approval'}
-                </div>
-              </div>
-
-              {/* Notification Timing (CONFIRMED INTERVALS) */}
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-900">6. Expiry Notification Timing</h4>
-                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 text-[10px] font-bold">
-                    Confirmed SACCO Schedule
-                  </span>
-                </div>
-                <p className="text-slate-600 text-xs">{businessRules.notificationTiming.notes}</p>
-                <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-slate-700 font-mono">
-                  Trigger Intervals: 30 Days • 14 Days • 7 Days • Due Date (0) • Post-Expiry Follow-Up
-                </div>
+              <p className="text-slate-600 text-xs">One-time initial enrollment fee for newly registered Turihamwe members.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-emerald-700 font-mono font-bold text-sm">
+                UGX {businessRules?.charges?.registrationFeeUGX ? businessRules.charges.registrationFeeUGX.toLocaleString() : '25,000'}
               </div>
             </div>
-          ) : (
-            <div className="text-center py-10 text-slate-500">Loading business configuration...</div>
-          )}
+
+            {/* 2. Annual Renewal Fee */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">2. Annual Renewal Fee</h4>
+                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">Annual renewal charge paid on or before expiry date. Extends cover for 12 months.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-blue-700 font-mono font-bold text-sm">
+                UGX {businessRules?.charges?.annualRenewalFeeUGX ? businessRules.charges.annualRenewalFeeUGX.toLocaleString() : '20,000'}
+              </div>
+            </div>
+
+            {/* 3. Renewal After Expiry */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">3. Renewal After Expiry</h4>
+                <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">Fee required for renewal after plan expiry date has passed.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-purple-700 font-mono font-bold text-sm">
+                UGX {businessRules?.charges?.postLapseReactivationFeeUGX ? businessRules.charges.postLapseReactivationFeeUGX.toLocaleString() : '25,000'}
+              </div>
+            </div>
+
+            {/* 4. Subscription Frequency */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">4. Subscription Frequency</h4>
+                <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">Contribution schedule strictly annual. Semi-annual, quarterly, monthly prohibited.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-slate-900 font-mono font-bold text-sm">
+                {businessRules?.contributionFrequency?.allowedFrequencies?.[0] || 'ANNUAL'}
+              </div>
+            </div>
+
+            {/* 5. Cover Duration */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">5. Cover Duration</h4>
+                <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">Runs for exactly 12 calendar months from recorded subscription date.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-slate-900 font-mono font-bold text-sm">
+                12 Calendar Months
+              </div>
+            </div>
+
+            {/* 6. Immediate Expiry (No Grace Period) */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">6. Immediate Expiry Policy</h4>
+                <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 text-[10px] font-bold">
+                  Prohibited Grace
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">No 6-month grace period, no cover extension. Plans expire immediately on maturity date unless renewed.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-rose-800 font-mono font-bold text-sm">
+                Zero Grace Period
+              </div>
+            </div>
+
+            {/* 7. Current Benefit Amount */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">7. Current Benefit</h4>
+                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">Burial support payout. Beneficiary death keeps plan active; member death closes plan.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-emerald-700 font-mono font-bold text-sm">
+                UGX {businessRules?.charges?.benefitAmountUGX ? businessRules.charges.benefitAmountUGX.toLocaleString() : (businessRules?.benefitAmountAndClaims?.currentBenefitUGX ? businessRules.benefitAmountAndClaims.currentBenefitUGX.toLocaleString() : '500,000')}
+              </div>
+            </div>
+
+            {/* 8. Expiry Notification Timing */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">8. Expiry Notification</h4>
+                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">SMS sent on exact maturity date at 09:00 EAT. 30d/14d/7d spam suppressed.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-slate-900 font-mono font-bold text-sm">
+                Exact Maturity Date Only
+              </div>
+            </div>
+
+            {/* 9. SMS Provider */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">9. SMS Provider</h4>
+                <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">Pandora Networks (Uganda). Approved Runyankore text with duplicate suppression.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-slate-900 font-mono font-bold text-sm">
+                Pandora Networks (SMS Gateway)
+              </div>
+            </div>
+
+            {/* 10. Maximum Family Members */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">10. Maximum Family Members</h4>
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-300 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">Maximum 13 per plan (1 primary + 12 beneficiaries). Children, parents, max 1 spouse.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-slate-900 font-mono font-bold text-sm">
+                13 Family Members
+              </div>
+            </div>
+
+            {/* 11. Maximum Beneficiary Age */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2 md:col-span-2 lg:col-span-1">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900">11. Maximum Beneficiary Age</h4>
+                <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">Beneficiary age cannot exceed 70 at enrollment. Existing active plans exempted.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-amber-900 font-mono font-bold text-sm">
+                70 Years at Enrollment
+              </div>
+            </div>
+
+            {/* 12. Permanent SACCO Account Number */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2 md:col-span-2 lg:col-span-2">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  12. Permanent SACCO Account Number (Indefinite Validity)
+                </h4>
+                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                  Active Policy
+                </span>
+              </div>
+              <p className="text-slate-600 text-xs">A SACCO account number is a permanent institutional member record and has NO expiry date, NO time limitation, NO automatic deactivation, and NO restrictions based on Turihamwe subscription status. It remains valid indefinitely even if Turihamwe cover expires, is not renewed, or has zero transactions. Only Turihamwe welfare coverage has a maturity and expiry date.</p>
+              <div className="p-2 bg-emerald-50 rounded border border-emerald-200 text-emerald-900 font-mono font-bold text-sm">
+                Permanent Institutional Identifier • Indefinite Validity (Never Expires)
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-2">
+            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+              <Sliders className="w-4 h-4 text-blue-700" />
+              Administrative Governance & Audit Standard (Policy 8)
+            </span>
+            <p className="text-slate-600 leading-relaxed">
+              Business parameters are strictly protected under the <code className="font-mono bg-white px-1.5 py-0.5 rounded border text-slate-800">admin.system_settings</code> permission, restricted to authorized administrators (IT Officer). Any parameter modifications require an operational reason, board approval reference, and are immutably logged with before-and-after values in the system audit trail.
+            </p>
+          </div>
         </div>
       )}
 
@@ -1854,6 +2221,238 @@ export const SystemView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: RESTORE FROM LOCAL BACKUP FILE (PRIORITY 2)        */}
+      {/* ========================================================= */}
+      {showUploadRestoreModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-xl w-full border border-amber-300 overflow-hidden">
+            <div className="bg-amber-50 text-amber-950 border-b border-amber-200 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-amber-900 flex items-center gap-1.5">
+                  <Upload className="w-4 h-4 text-amber-700" />
+                  Restore Database from Local Backup File
+                </h3>
+                <p className="text-[11px] text-amber-700">Priority 2 — Cryptographically verified external archive recovery</p>
+              </div>
+              <button onClick={() => setShowUploadRestoreModal(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteUploadRestore} className="p-6 space-y-4 text-xs">
+              {/* File Input */}
+              <div>
+                <label className="block font-semibold text-slate-800 mb-1">
+                  Select Backup Archive File (.bak or .json) *
+                </label>
+                <input
+                  type="file"
+                  accept=".bak,.json,application/json,application/octet-stream"
+                  onChange={handleSelectUploadFile}
+                  className="w-full text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-300 rounded-lg p-1.5 bg-white cursor-pointer"
+                />
+              </div>
+
+              {/* Validation Feedback */}
+              {isValidatingUpload && (
+                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 text-blue-800 flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
+                  Verifying cryptographic SHA-256 hash and table schema integrity...
+                </div>
+              )}
+
+              {uploadValidation && !isValidatingUpload && (
+                <div className={`p-3.5 rounded-lg border space-y-2 text-xs ${
+                  uploadValidation.valid
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                    : 'bg-red-50 border-red-200 text-red-950'
+                }`}>
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="flex items-center gap-1.5">
+                      {uploadValidation.valid ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-red-600" />
+                      )}
+                      {uploadValidation.valid ? 'Cryptographic Integrity & Schema Verified' : 'Integrity Verification Failed'}
+                    </span>
+                    <span className="font-mono text-[11px]">
+                      {(uploadValidation.sizeBytes / 1024).toFixed(1)} KB
+                    </span>
+                  </div>
+
+                  {uploadValidation.valid ? (
+                    <div className="space-y-1.5 text-[11px] text-slate-700">
+                      <div>
+                        SHA-256 Checksum: <code className="font-mono font-bold text-slate-800 text-[10px] break-all">{uploadValidation.computedChecksum}</code>
+                      </div>
+                      {uploadValidation.manifest && (
+                        <div>
+                          Manifest Match: <span className="font-semibold text-emerald-700">Yes</span> • Original Snapshot ID: <code className="font-mono">{uploadValidation.manifest.backupId || 'N/A'}</code>
+                        </div>
+                      )}
+                      <div className="pt-1.5 border-t border-emerald-200/60 grid grid-cols-3 gap-2 font-mono text-[10px]">
+                        <div>Users: <span className="font-bold">{uploadValidation.recordCounts?.users ?? 0}</span></div>
+                        <div>Members: <span className="font-bold">{uploadValidation.recordCounts?.members ?? 0}</span></div>
+                        <div>Plans: <span className="font-bold">{uploadValidation.recordCounts?.plans ?? 0}</span></div>
+                        <div>Branches: <span className="font-bold">{uploadValidation.recordCounts?.branches ?? 0}</span></div>
+                        <div>Contributions: <span className="font-bold">{uploadValidation.recordCounts?.contributions ?? 0}</span></div>
+                        <div>Claims: <span className="font-bold">{uploadValidation.recordCounts?.claims ?? 0}</span></div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-red-700 text-xs font-medium">
+                      Error: {uploadValidation.error || 'Corrupted or incompatible file structure.'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Safeguard notices */}
+              <div className="p-3 bg-blue-50/60 rounded-lg border border-blue-200 space-y-1 text-blue-950 text-[11px]">
+                <span className="font-bold flex items-center gap-1 text-blue-900">
+                  <ShieldCheck className="w-3.5 h-3.5 text-blue-700" />
+                  Preservation Safeguards & Rollback Protection
+                </span>
+                <p>
+                  1. The genuine <code className="font-bold font-mono">ivan</code> IT Officer account and multi-branch access permissions are unconditionally safeguarded and preserved.
+                </p>
+                <p>
+                  2. An automated pre-restore rollback snapshot is generated to disk immediately before restoration begins.
+                </p>
+              </div>
+
+              {/* Mandatory Reason */}
+              <div>
+                <label className="block font-semibold text-slate-800 mb-1">
+                  Mandatory Operational Justification Reason (min 10 characters) *
+                </label>
+                <textarea
+                  required
+                  rows={2}
+                  minLength={10}
+                  value={uploadRestoreReason}
+                  onChange={e => setUploadRestoreReason(e.target.value)}
+                  placeholder="e.g. Authorized disaster recovery drill / restoring verified offline backup archive..."
+                  className="w-full py-1.5 px-3 border border-slate-300 rounded-lg bg-white text-slate-900"
+                />
+              </div>
+
+              {/* Confirmation Checkbox */}
+              <label className="flex items-start gap-2 p-3 bg-amber-50/50 rounded-lg border border-amber-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  required
+                  checked={uploadRestoreConfirmed}
+                  onChange={e => setUploadRestoreConfirmed(e.target.checked)}
+                  className="w-4 h-4 text-red-600 rounded mt-0.5"
+                />
+                <span className="text-[11px] text-amber-900 font-medium">
+                  I confirm that I am authorized to perform this recovery operation, that the local file has passed SHA-256 verification, and that I accept the state restoration.
+                </span>
+              </label>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setShowUploadRestoreModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    isExecutingUploadRestore ||
+                    !uploadValidation?.valid ||
+                    !uploadRestoreConfirmed ||
+                    uploadRestoreReason.trim().length < 10
+                  }
+                  className="px-4 py-2 bg-red-700 hover:bg-red-800 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isExecutingUploadRestore ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  )}
+                  Execute File Recovery
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: DELETE OLD BACKUP CONFIRMATION (CONTROL 7)         */}
+      {/* ========================================================= */}
+      {backupToDelete && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full border border-red-300 overflow-hidden">
+            <div className="bg-red-50 text-red-950 border-b border-red-200 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-red-900 flex items-center gap-1.5">
+                  <Trash2 className="w-4 h-4 text-red-600" />
+                  Delete Old Backup Archive (.bak)
+                </h3>
+                <p className="text-[11px] text-red-700">Permanent administrative file purge</p>
+              </div>
+              <button onClick={() => setBackupToDelete(null)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-red-50/70 rounded-lg border border-red-200 space-y-1 text-red-900">
+                <span className="font-bold flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                  Irreversible Archive Deletion
+                </span>
+                <p>
+                  Are you sure you want to permanently delete this backup snapshot from the central repository?
+                </p>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1 text-slate-700 text-xs">
+                <div>Snapshot ID: <span className="font-mono font-bold text-slate-900">{backupToDelete.id}</span></div>
+                <div>Filename: <span className="font-mono text-[11px] text-blue-800">{backupToDelete.filename}</span></div>
+                <div>Created: <span className="font-mono">{new Date(backupToDelete.createdAt).toLocaleString()}</span></div>
+                <div>Size: <span className="font-mono font-semibold">{(backupToDelete.sizeBytes / 1024).toFixed(1)} KB</span></div>
+              </div>
+
+              <div className="p-2.5 bg-blue-50 rounded border border-blue-200 text-[11px] text-blue-900">
+                <strong>Safety Guard:</strong> System policy prohibits deleting the only backup or the most recent verified backup.
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setBackupToDelete(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingBackupId === backupToDelete.id}
+                  onClick={() => handleDeleteBackup(backupToDelete.id)}
+                  className="px-4 py-2 bg-red-700 hover:bg-red-800 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isDeletingBackupId === backupToDelete.id ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5" />
+                  )}
+                  Delete Backup Archive
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

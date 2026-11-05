@@ -16,7 +16,7 @@ export async function clearAllOperationalDataForDeployment(): Promise<{
   console.log('================================================================\n');
 
   await serverStore.initialize();
-  const results = serverStore.clearAllOperationalData('usr-it-01', 'itadm');
+  const results = serverStore.clearAllOperationalData('usr-it-ivan', 'ivan');
 
   console.log('[DEPLOYMENT PREP] Operational data tables cleared successfully:');
   console.log(`  - Members removed:        ${results.clearedMembers}`);

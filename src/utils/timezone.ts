@@ -293,3 +293,144 @@ export function calculateAnnualMaturityDate(subscriptionDateStr: string): string
 
   return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
 }
+
+export const MAX_NEW_TURIHAMWE_ENROLMENT_AGE = 69;
+export const MAX_TURIHAMWE_ELIGIBLE_AGE = 70; // 70 and above requires verified existing Turihamwe membership
+
+export interface AgeCalculationResult {
+  age: number;
+  isValid: boolean;
+  isEligibleForTurihamwe: boolean;
+  isNewEnrolmentEligible: boolean;
+  requiresExistingMemberVerification: boolean;
+  error?: string;
+  kampalaDateStr?: string;
+}
+
+/**
+ * Accurately calculates a person's completed years of age from their date of birth
+ * using the institutional current date in Africa/Kampala (UTC+03:00).
+ * 
+ * Rules:
+ * - Age = current Uganda year - birth year
+ * - If current Uganda month/day is before birth month/day, age is decremented by 1
+ * - Boundary: Applicant aged 69 or younger is eligible for new Turihamwe enrolment (age <= 69)
+ * - Boundary: Applicant aged 70 or older requires Existing Turihamwe Membership Verification (age >= 70)
+ * - Boundary: New applicants aged 70 or older without verified historical Turihamwe membership are ineligible
+ * - Boundary: Future dates of birth, unparseable strings, or missing values return isValid: false with error
+ */
+export function calculateUgandaAge(
+  dobInput: string | Date | undefined | null,
+  referenceDateInput: Date | string | number = new Date()
+): AgeCalculationResult {
+  if (!dobInput) {
+    return {
+      age: -1,
+      isValid: false,
+      isEligibleForTurihamwe: false,
+      isNewEnrolmentEligible: false,
+      requiresExistingMemberVerification: false,
+      error: 'Date of birth is required.',
+    };
+  }
+
+  let dobStr = '';
+  if (typeof dobInput === 'string') {
+    dobStr = dobInput.trim().split('T')[0];
+  } else if (dobInput instanceof Date && !isNaN(dobInput.getTime())) {
+    dobStr = dobInput.toISOString().split('T')[0];
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dobStr)) {
+    return {
+      age: -1,
+      isValid: false,
+      isEligibleForTurihamwe: false,
+      isNewEnrolmentEligible: false,
+      requiresExistingMemberVerification: false,
+      error: 'Date of birth must be a valid calendar date in YYYY-MM-DD format.',
+    };
+  }
+
+  const [birthYear, birthMonth, birthDay] = dobStr.split('-').map(Number);
+  if (birthMonth < 1 || birthMonth > 12 || birthDay < 1 || birthDay > 31) {
+    return {
+      age: -1,
+      isValid: false,
+      isEligibleForTurihamwe: false,
+      isNewEnrolmentEligible: false,
+      requiresExistingMemberVerification: false,
+      error: 'Date of birth contains invalid calendar month or day.',
+    };
+  }
+
+  const testDate = new Date(Date.UTC(birthYear, birthMonth - 1, birthDay));
+  if (
+    testDate.getUTCFullYear() !== birthYear ||
+    testDate.getUTCMonth() !== birthMonth - 1 ||
+    testDate.getUTCDate() !== birthDay
+  ) {
+    return {
+      age: -1,
+      isValid: false,
+      isEligibleForTurihamwe: false,
+      isNewEnrolmentEligible: false,
+      requiresExistingMemberVerification: false,
+      error: 'Date of birth is an invalid calendar date.',
+    };
+  }
+
+  const kampalaDateStr = getUgandaDateString(referenceDateInput);
+  if (!kampalaDateStr) {
+    return {
+      age: -1,
+      isValid: false,
+      isEligibleForTurihamwe: false,
+      isNewEnrolmentEligible: false,
+      requiresExistingMemberVerification: false,
+      error: 'Unable to resolve Africa/Kampala calendar date.',
+    };
+  }
+
+  const [currentYear, currentMonth, currentDay] = kampalaDateStr.split('-').map(Number);
+
+  // Future check: strictly in Africa/Kampala calendar context
+  if (
+    birthYear > currentYear ||
+    (birthYear === currentYear && birthMonth > currentMonth) ||
+    (birthYear === currentYear && birthMonth === currentMonth && birthDay > currentDay)
+  ) {
+    return {
+      age: -1,
+      isValid: false,
+      isEligibleForTurihamwe: false,
+      isNewEnrolmentEligible: false,
+      requiresExistingMemberVerification: false,
+      error: 'Date of birth cannot be in the future.',
+    };
+  }
+
+  let age = currentYear - birthYear;
+  if (
+    currentMonth < birthMonth ||
+    (currentMonth === birthMonth && currentDay < birthDay)
+  ) {
+    age--;
+  }
+
+  const isNewEnrolmentEligible = age <= MAX_NEW_TURIHAMWE_ENROLMENT_AGE;
+  const requiresExistingMemberVerification = age >= MAX_TURIHAMWE_ELIGIBLE_AGE;
+  const isEligibleForTurihamwe = isNewEnrolmentEligible; // for fresh enrolment
+
+  return {
+    age,
+    isValid: true,
+    isEligibleForTurihamwe,
+    isNewEnrolmentEligible,
+    requiresExistingMemberVerification,
+    kampalaDateStr,
+    error: requiresExistingMemberVerification
+      ? `This person is aged ${age} years, which is above the maximum age (69 years) for new Turihamwe enrolment. Existing Turihamwe membership verification required.`
+      : undefined,
+  };
+}
