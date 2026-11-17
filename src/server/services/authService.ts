@@ -60,6 +60,28 @@ export class AuthService {
     return Array.from(basePermissions);
   }
 
+  private static resolveCanonicalBranchId(branchIdOrCode?: string): string {
+    if (!branchIdOrCode) return '';
+    const resolved = serverStore.getBranchById(branchIdOrCode);
+    return resolved ? resolved.id : branchIdOrCode.trim().toLowerCase();
+  }
+
+  public static isBranchAuthorizedForUser(user: User, branchIdOrCode: string): boolean {
+    const targetBranchId = this.resolveCanonicalBranchId(branchIdOrCode);
+    if (!targetBranchId) return false;
+
+    const primaryBranchId = this.resolveCanonicalBranchId(user.primaryBranchId);
+    if (user.hasMultiBranchAccess) {
+      const allowed = new Set<string>([
+        primaryBranchId,
+        ...(user.allowedBranchIds || []).map(id => this.resolveCanonicalBranchId(id)),
+      ]);
+      return allowed.has(targetBranchId);
+    }
+
+    return primaryBranchId === targetBranchId;
+  }
+
   /**
    * Branch-aware login validation
    */
@@ -71,6 +93,15 @@ export class AuthService {
     userAgent?: string;
   }): Promise<{ success: boolean; session?: AuthSession; message?: string }> {
     const { branchId, username, password, ipAddress, userAgent } = params;
+
+    if (!serverStore.isDatabaseHealthy()) {
+      return {
+        success: false,
+        message:
+          serverStore.getDatabaseError() ||
+          'Database is unavailable or awaiting recovery. Existing SACCO records remain protected.',
+      };
+    }
 
     // Validate username length (4 to 10 chars per SACCO institutional standard)
     if (!username || username.trim().length < 4 || username.trim().length > 10) {
@@ -166,16 +197,10 @@ export class AuthService {
       };
     }
 
-    // Enforce branch assignment:
-    // Single-branch users MUST match primaryBranchId exactly.
+    // Enforce branch assignment strictly using canonical branch IDs:
+    // Single-branch users MUST match primaryBranchId.
     // Multi-branch users can choose primaryBranchId or any allowedBranchIds.
-    let branchAuthorized = false;
-    if (user.hasMultiBranchAccess) {
-      const allowed = new Set([user.primaryBranchId, ...(user.allowedBranchIds || [])]);
-      branchAuthorized = allowed.has(selectedBranch.id);
-    } else {
-      branchAuthorized = user.primaryBranchId === selectedBranch.id;
-    }
+    const branchAuthorized = this.isBranchAuthorizedForUser(user, selectedBranch.id);
 
     if (!branchAuthorized) {
       AuditService.log({
@@ -277,7 +302,7 @@ export class AuthService {
    * Verify token and rebuild session
    */
   public static verifyToken(token: string): { valid: boolean; session?: AuthSession } {
-    if (!token || this.revokedTokens.has(token)) {
+    if (!token || this.revokedTokens.has(token) || !serverStore.isDatabaseHealthy()) {
       return { valid: false };
     }
 
@@ -297,8 +322,9 @@ export class AuthService {
         return { valid: false };
       }
 
-      const branch = serverStore.getBranchById(decoded.workingBranchId) || serverStore.getBranchById(user.primaryBranchId);
-      if (!branch) {
+      const targetBranchId = decoded.workingBranchId || user.primaryBranchId;
+      const branch = serverStore.getBranchById(targetBranchId);
+      if (!branch || !branch.isActive || !this.isBranchAuthorizedForUser(user, branch.id)) {
         return { valid: false };
       }
 
@@ -342,17 +368,16 @@ export class AuthService {
       };
     }
 
-    const allowed = new Set([user.primaryBranchId, ...(user.allowedBranchIds || [])]);
-    if (!allowed.has(params.newBranchId)) {
+    const branch = serverStore.getBranchById(params.newBranchId);
+    if (!branch || !branch.isActive) {
+      return { success: false, message: 'Selected branch is unavailable.' };
+    }
+
+    if (!this.isBranchAuthorizedForUser(user, branch.id)) {
       return {
         success: false,
         message: 'User is not permitted to access this designated branch.',
       };
-    }
-
-    const branch = serverStore.getBranchById(params.newBranchId);
-    if (!branch || !branch.isActive) {
-      return { success: false, message: 'Selected branch is unavailable.' };
     }
 
     const token = jwt.sign(

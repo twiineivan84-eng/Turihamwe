@@ -649,12 +649,17 @@ export class ServerStore {
     if (!id) return undefined;
     const clean = id.trim().toLowerCase();
     return this.state.branches.find(
-      b => b.id.toLowerCase() === clean || b.code.toLowerCase() === clean
+      b =>
+        b.id.trim().toLowerCase() === clean ||
+        b.code.trim().toLowerCase() === clean ||
+        b.name.trim().toLowerCase() === clean
     );
   }
 
   public getBranchByCode(code: string): Branch | undefined {
-    return this.state.branches.find(b => b.code === code);
+    if (!code) return undefined;
+    const clean = code.trim().toLowerCase();
+    return this.state.branches.find(b => b.code.trim().toLowerCase() === clean);
   }
 
   // Roles & Permissions
@@ -705,24 +710,31 @@ export class ServerStore {
 
   // Users
   public getUsers(): User[] {
-    return this.state.users.filter(u => !this.isUserDeleted(u.id) && !this.isUserDeleted(u.username));
+    return this.state.users.filter(u => {
+      const cleanName = (u.username || '').trim().toLowerCase();
+      if (PROTECTED_ROOT_ADMIN_USERNAMES.includes(cleanName)) return true;
+      return !this.isUserDeleted(u.id) && !this.isUserDeleted(cleanName);
+    });
   }
 
   public getUserById(id: string): User | undefined {
-    if (this.isUserDeleted(id)) return undefined;
     const user = this.state.users.find(u => u.id === id);
-    if (user && this.isUserDeleted(user.username)) return undefined;
+    if (!user) return undefined;
+    const cleanName = (user.username || '').trim().toLowerCase();
+    if (PROTECTED_ROOT_ADMIN_USERNAMES.includes(cleanName)) return user;
+    if (this.isUserDeleted(id) || this.isUserDeleted(cleanName)) return undefined;
     return user;
   }
 
   public getUserByUsername(username: string): User | undefined {
     if (!username) return undefined;
     const clean = username.trim().toLowerCase();
-    if (this.isUserDeleted(clean)) return undefined;
+    const isProtectedRoot = PROTECTED_ROOT_ADMIN_USERNAMES.includes(clean);
+    if (!isProtectedRoot && this.isUserDeleted(clean)) return undefined;
     const user = this.state.users.find(
-      u => u.username.toLowerCase() === clean
+      u => (u.username || '').trim().toLowerCase() === clean
     );
-    if (user && this.isUserDeleted(user.id)) return undefined;
+    if (user && !isProtectedRoot && this.isUserDeleted(user.id)) return undefined;
     return user;
   }
 

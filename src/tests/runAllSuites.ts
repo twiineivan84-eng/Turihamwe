@@ -26,6 +26,7 @@ import { ExistingMemberAgeVerificationTestRunner } from './existingMemberAgeVeri
 import { TurihamweSmsCleanupAuditRunner } from './turihamweSmsCleanupAudit.test';
 import { TurihamweBeneficiaryRulesAuditRunner } from './turihamweBeneficiaryRulesAudit.test';
 import { DataProtectionNoFakeGenerationTestRunner } from './dataProtectionNoFakeGeneration.test';
+import { PwaAndAuthHardeningTestRunner } from './pwaAndAuthHardening.test';
 import { ensureIsolatedTestAdmin } from './testAdminHelper';
 import { serverStore } from '../server/storage/serverStore';
 
@@ -341,6 +342,26 @@ async function main() {
     }
   } catch (err: any) {
     console.error('Data protection & zero fake generation audit suite execution error:', err.message);
+    hasAnyFailure = true;
+  }
+
+  // 17. PWA, Authentication & Production Hardening Suite
+  console.log('\n>>> [SUITE 17/17] PWA, AUTHENTICATION & PRODUCTION HARDENING AUDIT');
+  try {
+    const pwaAuthResults = await PwaAndAuthHardeningTestRunner.runAllTests();
+    for (const r of pwaAuthResults) {
+      grandTotal++;
+      if (r.passed) {
+        grandPassed++;
+        console.log(`  ✓ Test ${r.id.toString().padStart(2, '0')}: ${r.name}`);
+      } else {
+        grandFailed++;
+        hasAnyFailure = true;
+        console.log(`  ✗ Test ${r.id.toString().padStart(2, '0')}: ${r.name} — ${r.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error('PWA & auth hardening suite execution error:', err.message);
     hasAnyFailure = true;
   }
 

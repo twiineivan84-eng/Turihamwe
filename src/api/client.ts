@@ -174,14 +174,19 @@ class ApiClient {
       return await this.request<{ valid: boolean; session?: AuthSession }>('/auth/verify', {
         method: 'POST',
       });
-    } catch {
-      try {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('404')) {
         return await this.request<{ valid: boolean; session?: AuthSession }>('/verify', {
           method: 'POST',
         });
-      } catch {
+      }
+      // If session expired or explicit HTTP 401/403/503 rejection, propagate or invalidate cleanly
+      if (msg.includes('Session expired') || msg.includes('HTTP 401')) {
         return { valid: false };
       }
+      // Rethrow genuine network/offline errors so AuthContext can safely evaluate cached offline state
+      throw err;
     }
   }
 
@@ -239,7 +244,12 @@ class ApiClient {
     });
   }
 
-  public async checkSetupStatus(): Promise<{ hasUsers: boolean; userCount: number }> {
+  public async checkSetupStatus(): Promise<{
+    hasUsers: boolean;
+    userCount: number;
+    databaseHealthy?: boolean;
+    databaseError?: string | null;
+  }> {
     return this.request('/auth/setup-status');
   }
 

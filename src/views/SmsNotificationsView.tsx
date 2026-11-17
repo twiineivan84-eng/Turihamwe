@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { apiClient } from '../api/client';
 import {
   SmsMessage,
@@ -46,6 +47,7 @@ import {
 
 export const SmsNotificationsView: React.FC = () => {
   const { user, workingBranch, hasPermission } = useAuth();
+  const isOnline = useOnlineStatus();
 
   // Navigation sub-tabs
   const [activeTab, setActiveTab] = useState<'queue' | 'templates' | 'events' | 'compose'>('queue');
@@ -555,7 +557,7 @@ export const SmsNotificationsView: React.FC = () => {
           {canSendSms && (
             <button
               onClick={handleProcessQueue}
-              disabled={actionLoadingId === 'batch-process' || pendingCount === 0}
+              disabled={!isOnline || actionLoadingId === 'batch-process' || pendingCount === 0}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold shadow-xs transition disabled:opacity-50"
             >
               <Send className={`w-3.5 h-3.5 ${actionLoadingId === 'batch-process' ? 'animate-spin' : ''}`} />
@@ -574,6 +576,15 @@ export const SmsNotificationsView: React.FC = () => {
           )}
         </div>
       </div>
+
+      {!isOnline && (
+        <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2.5">
+          <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            <strong>Internet Connectivity Required for SMS Transmission:</strong> Pandora Networks SMS dispatch and balance verification are paused while offline. Pending messages remain safely queued until internet connectivity returns.
+          </span>
+        </div>
+      )}
 
       {/* SMS Gateway Provider Status & Diagnostics Panel */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
@@ -650,7 +661,7 @@ export const SmsNotificationsView: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleTestConnection}
-              disabled={isConnectionTesting}
+              disabled={!isOnline || isConnectionTesting}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold border border-slate-300 transition disabled:opacity-50"
               title="Verify credentials with Pandora Networks balance API without sending any SMS"
             >
@@ -661,7 +672,8 @@ export const SmsNotificationsView: React.FC = () => {
             {canSendSms && (
               <button
                 onClick={() => setIsTestSendModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-semibold border border-blue-200 transition"
+                disabled={!isOnline}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-semibold border border-blue-200 transition disabled:opacity-50"
                 title="Send a clearly labelled administrative test SMS to verify end-to-end delivery"
               >
                 <FlaskConical className="w-3.5 h-3.5 text-blue-600" />

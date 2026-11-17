@@ -34,9 +34,23 @@ const isProd = config.app.isProduction;
 async function bootstrap() {
   const app = express();
 
+  // Trust reverse proxy (HTTPS termination via Nginx/Caddy/IIS/Cloud)
+  app.set('trust proxy', 1);
+
   // Basic middleware
   app.use(express.json({ limit: `${config.storage.maxUploadSizeMb}mb` }));
   app.use(express.urlencoded({ extended: true, limit: `${config.storage.maxUploadSizeMb}mb` }));
+
+  // Hardened HTTP security headers (preserves iframe compatibility for preview/client environments)
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    if (isProd && (req.secure || req.headers['x-forwarded-proto'] === 'https')) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    next();
+  });
 
   // Normalize consecutive slashes in request URLs to prevent Express routing 404s
   app.use((req, _res, next) => {
@@ -64,7 +78,10 @@ async function bootstrap() {
     }
 
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With, X-Working-Branch'
+    );
     res.setHeader('Access-Control-Allow-Credentials', 'true');
 
     if (req.method === 'OPTIONS') {
@@ -79,15 +96,64 @@ async function bootstrap() {
     res.status(403).json({ error: 'Access forbidden: internal data repositories are protected from public web access.' });
   });
 
-  // Initialize persistence and validate non-operational reference configuration
-  await serverStore.initialize();
-  await SeedService.ensureReferenceConfiguration();
+  // Initialize persistence safely: never silently overwrite or reseed missing/corrupt production database
+  try {
+    await serverStore.initialize();
+    await SeedService.ensureReferenceConfiguration();
+    smsQueueWorker.start();
+    scheduledBackupWorker.start();
+  } catch (dbErr) {
+    console.error(
+      '[DATABASE RECOVERY REQUIRED] Database initialization failed. Existing database files have NOT been overwritten or reset:',
+      dbErr instanceof Error ? dbErr.message : dbErr
+    );
+  }
 
-  // Start background Pandora SMS Queue Worker
-  smsQueueWorker.start();
+  // Fail-closed guard for operational API routes when database is unhealthy
+  app.use((req, res, next) => {
+    if (serverStore.isDatabaseHealthy()) {
+      next();
+      return;
+    }
 
-  // Start background Automated Midnight Backup Worker (00:00 Africa/Kampala)
-  scheduledBackupWorker.start();
+    const reqPath = req.path || '';
+    const isDiagnosticRoute =
+      reqPath === '/health' ||
+      reqPath === '/api/health' ||
+      reqPath === '/setup-status' ||
+      reqPath === '/api/setup-status' ||
+      reqPath === '/api/auth/setup-status' ||
+      reqPath === '/auth/setup-status';
+
+    const isApiRoute =
+      reqPath.startsWith('/api') ||
+      reqPath.startsWith('/auth') ||
+      reqPath.startsWith('/branches') ||
+      reqPath.startsWith('/users') ||
+      reqPath.startsWith('/members') ||
+      reqPath.startsWith('/turihamwe') ||
+      reqPath.startsWith('/claims') ||
+      reqPath.startsWith('/sms') ||
+      reqPath.startsWith('/alerts') ||
+      reqPath.startsWith('/reports') ||
+      reqPath.startsWith('/system') ||
+      reqPath.startsWith('/audit-logs') ||
+      reqPath.startsWith('/sync') ||
+      reqPath === '/login' ||
+      reqPath === '/verify';
+
+    if (isApiRoute && !isDiagnosticRoute) {
+      res.status(503).json({
+        success: false,
+        databaseRecoveryRequired: true,
+        message:
+          serverStore.getDatabaseError() ||
+          'Database is missing, corrupted, or inaccessible. Refusing to initialize an empty database over production records.',
+      });
+      return;
+    }
+    next();
+  });
 
   // Direct authentication endpoints for root and /api shortcuts to prevent any 404s
   app.all(['/login', '/api/login'], (req, res, next) => {
@@ -204,6 +270,18 @@ async function bootstrap() {
   const hasDist = fs.existsSync(distPath) && fs.existsSync(path.resolve(distPath, 'index.html'));
 
   if (isProd && hasDist) {
+    app.get('/sw.js', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Service-Worker-Allowed', '/');
+      res.sendFile(path.resolve(distPath, 'sw.js'));
+    });
+
+    app.get(['/manifest.webmanifest', '/manifest.json'], (_req, res) => {
+      res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(path.resolve(distPath, 'manifest.webmanifest'));
+    });
+
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(distPath, 'index.html'));

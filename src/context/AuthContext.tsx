@@ -9,6 +9,7 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  databaseRecoveryError: string | null;
   hasPermission: (permission: PermissionCode) => boolean;
   hasAnyPermission: (permissions: PermissionCode[]) => boolean;
   hasAllPermissions: (permissions: PermissionCode[]) => boolean;
@@ -26,6 +27,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [effectivePermissions, setEffectivePermissions] = useState<PermissionCode[]>([]);
   const [token, setToken] = useState<string | null>(apiClient.getToken());
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [databaseRecoveryError, setDatabaseRecoveryError] = useState<string | null>(null);
 
   const applySession = (session: AuthSession) => {
     setUser(session.user);
@@ -55,6 +57,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const refreshSession = useCallback(async () => {
+    try {
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        const status = await apiClient.checkSetupStatus();
+        if (status.databaseHealthy === false) {
+          setDatabaseRecoveryError(
+            status.databaseError ||
+              'Database is missing, corrupted, or inaccessible. Existing institutional records have been protected.'
+          );
+          clearSession();
+          setIsLoading(false);
+          return;
+        }
+        setDatabaseRecoveryError(null);
+      }
+    } catch {
+      // Network offline or transient startup error: proceed with offline/token verification checks
+    }
+
     const currentToken = apiClient.getToken();
     if (!currentToken) {
       clearSession();
@@ -71,7 +91,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         clearSession();
       }
     } catch {
-      // Genuine network failure (browser offline)
+      // Genuine network failure (browser offline): safely resume cached session strictly while offline
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         const cachedUserStr = localStorage.getItem('turihamwe_cached_user');
         const cachedBranchStr = localStorage.getItem('turihamwe_cached_branch');
@@ -115,10 +135,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const res = await apiClient.login(branchId, username, password);
       if (res.success && res.session) {
+        setDatabaseRecoveryError(null);
         applySession(res.session);
         return { success: true };
       }
-      return { success: false, message: 'Invalid credentials or branch access denied' };
+      const fallbackMsg =
+        (res as { message?: string }).message ||
+        'Invalid credentials or branch selection. Please contact your IT administrator.';
+      return { success: false, message: fallbackMsg };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Authentication service error';
       return { success: false, message };
@@ -165,6 +189,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         token,
         isAuthenticated: !!user && !!workingBranch,
         isLoading,
+        databaseRecoveryError,
         hasPermission,
         hasAnyPermission,
         hasAllPermissions,

@@ -4,7 +4,9 @@ import { apiClient } from '../../api/client';
 import { Branch } from '../../types';
 import { INITIAL_BRANCHES } from '../../constants/branches';
 import { SaccoLogo } from '../common/SaccoLogo';
-import { RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { PWAInstallButton } from '../common/PWAInstallButton';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { RefreshCw, Eye, EyeOff, WifiOff } from 'lucide-react';
 
 interface LoginFormProps {
   onOpenSetupAdmin?: () => void;
@@ -20,6 +22,7 @@ export const LoginForm: React.FC<LoginFormProps> = () => {
     return [kamubeizi, ...branches.filter(b => b.id !== kamubeizi.id)];
   };
 
+  const isOnline = useOnlineStatus();
   const [allBranches, setAllBranches] = useState<Branch[]>(() => orderBranches(INITIAL_BRANCHES));
   const [selectedBranchId, setSelectedBranchId] = useState<string>('br-nyamuyanja');
   const [username, setUsername] = useState<string>('');
@@ -36,6 +39,13 @@ export const LoginForm: React.FC<LoginFormProps> = () => {
         if (res.success && res.data.length > 0) {
           const ordered = orderBranches(res.data);
           setAllBranches(ordered);
+          setSelectedBranchId((prev) => {
+            if (ordered.some((b) => b.id === prev)) return prev;
+            const nyamuyanja = ordered.find(
+              (b) => b.code === 'NYAMUYANJA' || b.name.toLowerCase().includes('nyamuyanja')
+            );
+            return nyamuyanja ? nyamuyanja.id : ordered[0].id;
+          });
         }
       } catch (err) {
         console.error('Failed to refresh branches from server:', err);
@@ -107,6 +117,13 @@ export const LoginForm: React.FC<LoginFormProps> = () => {
         <p className="text-xs text-slate-500 font-medium tracking-wide uppercase mb-6 text-center">
           Nyamuyanja SACCO Ltd
         </p>
+
+        {!isOnline && (
+          <div className="w-full mb-4 p-2.5 rounded-[8px] bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center justify-center gap-2 font-medium">
+            <WifiOff className="w-3.5 h-3.5 shrink-0" />
+            <span>Internet offline — new server sign-in requires connectivity.</span>
+          </div>
+        )}
 
         {/* Error message banner */}
         {errorMessage && (
@@ -244,6 +261,11 @@ export const LoginForm: React.FC<LoginFormProps> = () => {
         <p className="mt-5 text-center text-[13px] text-[#556987] leading-relaxed max-w-[320px]">
           Cannot sign in? Contact an authorised administrator.
         </p>
+
+        {/* PWA Installation Entry Point */}
+        <div className="mt-4 pt-4 border-t border-slate-100 w-full flex justify-center">
+          <PWAInstallButton variant="login" />
+        </div>
       </div>
     </div>
   );

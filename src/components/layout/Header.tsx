@@ -4,6 +4,7 @@ import { useSync } from '../../context/SyncContext';
 import { apiClient } from '../../api/client';
 import { Branch } from '../../types';
 import { SaccoLogo } from '../common/SaccoLogo';
+import { PWAInstallButton } from '../common/PWAInstallButton';
 import { AlertCenterDrawer } from '../alerts/AlertCenterDrawer';
 import { NavigationTab } from './Sidebar';
 import { UgandaClock } from './UgandaClock';
@@ -187,6 +188,9 @@ export const Header: React.FC<HeaderProps> = ({ onNavigateTab }) => {
                 </div>
               )}
             </div>
+
+            {/* In-App PWA Install Button */}
+            <PWAInstallButton variant="header" />
 
             {/* Offline-First Sync Badge & Trigger */}
             <div className="flex items-center gap-1.5">

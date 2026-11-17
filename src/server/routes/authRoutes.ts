@@ -10,6 +10,17 @@ export const authRouter = Router();
 // Login
 authRouter.post('/login', async (req: Request, res: Response) => {
   try {
+    if (!serverStore.isDatabaseHealthy()) {
+      res.status(503).json({
+        success: false,
+        databaseRecoveryRequired: true,
+        message:
+          serverStore.getDatabaseError() ||
+          'Database is unavailable or awaiting recovery. Existing SACCO records remain protected; contact your IT administrator.',
+      });
+      return;
+    }
+
     const { branchId, username, password } = req.body;
     const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
     const userAgent = req.headers['user-agent'];
@@ -57,6 +68,14 @@ authRouter.post('/verify', (req: Request, res: Response) => {
 
 // Query user branch configuration (for branch dropdown UX)
 authRouter.get('/user-branches', (req: Request, res: Response) => {
+  if (!serverStore.isDatabaseHealthy()) {
+    res.status(503).json({
+      databaseRecoveryRequired: true,
+      error: serverStore.getDatabaseError() || 'Database is unavailable.',
+    });
+    return;
+  }
+
   const username = req.query.username as string;
   if (!username) {
     res.status(400).json({ error: 'Username parameter required' });
@@ -73,11 +92,14 @@ authRouter.get('/user-branches', (req: Request, res: Response) => {
   }
 
   const branches = serverStore.getBranches();
-  const primaryBranch = branches.find(b => b.id === user.primaryBranchId);
+  const primaryBranch = serverStore.getBranchById(user.primaryBranchId);
 
   let allowedBranches: Branch[] = [];
   if (user.hasMultiBranchAccess) {
-    const allowedIds = new Set([user.primaryBranchId, ...(user.allowedBranchIds || [])]);
+    const allowedIds = new Set<string>([
+      primaryBranch?.id || user.primaryBranchId,
+      ...(user.allowedBranchIds || []).map(id => serverStore.getBranchById(id)?.id || id),
+    ]);
     allowedBranches = branches.filter(b => allowedIds.has(b.id));
   } else if (primaryBranch) {
     allowedBranches = [primaryBranch];
@@ -86,7 +108,7 @@ authRouter.get('/user-branches', (req: Request, res: Response) => {
   res.json({
     found: true,
     hasMultiBranchAccess: user.hasMultiBranchAccess,
-    primaryBranchId: user.primaryBranchId,
+    primaryBranchId: primaryBranch?.id || user.primaryBranchId,
     primaryBranchName: primaryBranch?.name,
     allowedBranches,
   });
@@ -167,10 +189,13 @@ authRouter.post('/setup-admin', async (req: Request, res: Response) => {
 
 // Check if initial admin setup is required
 authRouter.get('/setup-status', (_req: Request, res: Response) => {
-  const users = serverStore.getUsers();
+  const healthy = serverStore.isDatabaseHealthy();
+  const users = healthy ? serverStore.getUsers() : [];
   res.json({
     hasUsers: users.length > 0,
     userCount: users.length,
+    databaseHealthy: healthy,
+    databaseError: serverStore.getDatabaseError(),
   });
 });
 

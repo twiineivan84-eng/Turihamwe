@@ -1,207 +1,87 @@
-# Turihamwe Management System — Deployment Readiness Guide
-**Target Institution:** Nyamuyanja SACCO Ltd, Isingiro, Uganda  
-**Environment:** Production Central Cloud & Distributed Branch Infrastructure
+# Turihamwe Management System — Production & PWA Deployment Guide
+**Institution:** Nyamuyanja SACCO Ltd, Isingiro District, Uganda
 
----
+## 1. Prerequisites
+- Node.js 20 LTS or newer
+- Persistent host directory for SACCO database, claim attachments, and automated backups (e.g., `/var/lib/turihamwe/data` on Linux or `D:\NyamuyanjaSACCO\TurihamweData` on Windows)
+- HTTPS reverse proxy (Nginx, Caddy, Cloudflare, or IIS) serving the application over TLS (`https://`) — **required by Chrome and Microsoft Edge for production PWA installation outside localhost**
 
-## 1. Architectural Separation from SACCO Core Banking
+## 2. Production Environment Configuration
+Copy `.env.example` to `.env` (or inject via systemd/Docker/Windows environment variables) and configure real institutional values:
 
-### Mandatory Security Rule
-**The Turihamwe Management System MUST run on an independent server/cloud container completely separated from Nyamuyanja SACCO's internal core banking server.**
-
-```
-┌─────────────────────────────────┐         ┌─────────────────────────────────┐
-│     Nyamuyanja SACCO Ltd        │         │   Turihamwe Management System   │
-│   Internal Core Banking Server  │         │   (Independent Cloud Server)    │
-│  (Isolated LAN, No Direct Turihamwe) │         │   - Node.js Express Backend     │
-│  - Member Savings & Share Accounts │         │   - React 19 Frontend SPA       │
-│  - Loan Portfolios & Ledger     │         │   - Persistent Journal Store    │
-│  - Daily Teller Clearing        │         │   - Pandora Networks SMS Gateway│
-└─────────────────────────────────┘         └─────────────────────────────────┘
-                                                             ▲
-                                                             │ HTTPS (TLS 1.3)
-                                                             │ Offline-First Sync
-                                            ┌────────────────┴────────────────┐
-                                            │      6 SACCO Branch Terminals   │
-                                            │ - Kamubeizi (First in dropdown) │
-                                            │ - Nyamuyanja (Headquarters)     │
-                                            │ - Kagarama                      │
-                                            │ - Nyakigyera                    │
-                                            │ - Ruborogota                    │
-                                            │ - Masha                         │
-                                            └─────────────────────────────────┘
-```
-
-**Rationale:**
-1. **Financial Risk Isolation:** Prevents any software defects, bereavement claims, or welfare operations from interfering with core savings and loan transactions.
-2. **Regulatory & Audit Compliance:** Complies with Bank of Uganda (BoU) and Uganda Microfinance Regulatory Authority (UMRA) guidelines requiring strict segregation between regulated financial ledgers and auxiliary social protection funds.
-3. **Availability:** Turihamwe operations can proceed even during core banking end-of-day reconciliation or maintenance windows.
-
----
-
-## 2. Infrastructure Requirements
-
-### 2.1 Central Cloud Server
-- **Operating System:** Ubuntu Server 22.04 LTS or 24.04 LTS (x86_64)
-- **Compute:** Minimum 2 vCPUs, 4 GB RAM (8 GB recommended for 50,000+ members)
-- **Storage:** 50 GB SSD with automated daily backup snapshots
-- **Network:** Static Public IPv4, TLS 1.3 reverse proxy (Nginx or Caddy)
-- **Node.js Runtime:** v20.x LTS or v22.x LTS with `pm2` process manager
-
-### 2.2 Central PostgreSQL Database
-- **Engine:** PostgreSQL 15 or 16
-- **Database Name:** `turihamwe_db`
-- **User:** `turihamwe_user` (restricted privileges, no superuser)
-- **DDL Initialization Script:** `src/db/central/schema.sql`
-
----
-
-## 3. Database Setup & Migration
-
-### Step 1: Create PostgreSQL Database & User
-```bash
-# Connect as postgres administrator
-sudo -u postgres psql
-
-# Execute creation statements
-CREATE USER turihamwe_user WITH PASSWORD 'Replace_With_Strong_Production_Password_2026';
-CREATE DATABASE turihamwe_db OWNER turihamwe_user;
-GRANT ALL PRIVILEGES ON DATABASE turihamwe_db TO turihamwe_user;
-\c turihamwe_db
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-\q
-```
-
-### Step 2: Apply Central Database DDL Schema
-```bash
-psql -U turihamwe_user -d turihamwe_db -h localhost -f src/db/central/schema.sql
-```
-
-The schema will automatically establish:
-- The 6 SACCO branches with unique codes and Kamubeizi priority
-- Role definitions (GM, IT_OFFICER, BRANCH_MGR, TELLER, ACCOUNTS_ASST, AUDITOR)
-- Granular permission codes
-- Members table with `sacco_account_number` as primary key
-- Turihamwe plans, beneficiaries, contributions, renewals, claims, documents, and audit trails
-- Synchronization journal table
-
----
-
-## 4. Production Environment Configuration
-
-Create `/etc/turihamwe/.env` or `.env` in the application root with production credentials:
-
-```ini
-# Production Environment
-NODE_ENV="production"
+```env
+NODE_ENV=production
 PORT=3000
-APP_URL="https://turihamwe.nyamuyanjasacco.ug"
+DISABLE_HMR=true
+STRICT_PROD_CONFIG=true
 
-# JWT Token Security (Must be at least 32 characters of high-entropy random bytes)
-# Generate with: openssl rand -base64 32
-JWT_SECRET="e9f8a3c4b1d2e5f7a0b3c6d9e2f5a8b1c4d7e0f3a6b9c2d5e8f1a4b7c0d3e6f9"
-JWT_EXPIRY="12h"
+APP_URL=https://turihamwe.nyamuyanjasacco.ug
+CORS_ALLOWED_ORIGINS=https://turihamwe.nyamuyanjasacco.ug
 
-# Central PostgreSQL Connection
-DATABASE_URL="postgresql://turihamwe_user:Your_Production_Password@localhost:5432/turihamwe_db?sslmode=require"
-PGHOST="localhost"
-PGPORT="5432"
-PGDATABASE="turihamwe_db"
-PGUSER="turihamwe_user"
-PGPASSWORD="Your_Production_Password"
+# Generate with: openssl rand -hex 32
+JWT_SECRET=<REPLACE_WITH_MIN_32_CHAR_RANDOM_SECRET>
+JWT_EXPIRY=12h
 
-# Persistent Storage Directory (MUST be mounted to durable disk/volume in containers)
-TUR_PERSISTENT_DATA_DIR="/var/turihamwe/data"
+# Durable data storage outside deployment folder (never overwritten on code updates)
+TUR_PERSISTENT_DATA_DIR=/var/lib/turihamwe/data
 
-# Pandora Networks Uganda Live SMS API Credentials (Exclusive Provider)
-SMS_PROVIDER="PANDORA"
-SMS_ENABLED="true"
-PANDORA_SMS_API_URL="https://www.sms.thepandoranetworks.com/API/send_sms/"
-PANDORA_SMS_BALANCE_URL="https://www.sms.thepandoranetworks.com/API/balance_inquiry.php"
-PANDORA_SMS_PHONE_NUMBER="2567XXXXXXXX"
-PANDORA_SMS_PASSWORD="Replace_With_Pandora_Account_Password"
-PANDORA_SMS_SENDER_ID="NYAMUYANJA"
-
-# Automated Backup Directory
-BACKUP_STORAGE_DIR="/var/turihamwe/backups"
-BACKUP_ENCRYPTION_KEY="your_disaster_recovery_backup_passphrase"
+# Exclusive SMS Provider: Pandora Networks
+SMS_PROVIDER=PANDORA
+SMS_ENABLED=true
+PANDORA_SMS_PHONE_NUMBER=2567XXXXXXXX
+PANDORA_SMS_PASSWORD=<YOUR_PANDORA_PASSWORD>
+PANDORA_SMS_SENDER_ID=NYAMUYANJA
 ```
 
----
+> **Security Notes**
+> - Do not commit `.env` to version control.
+> - Set `STRICT_PROD_CONFIG=true` in production so the server rejects startup if `JWT_SECRET` uses a development placeholder.
+> - Never clear, reseed, or run `db:clear` against `TUR_PERSISTENT_DATA_DIR` in production.
 
-## 5. Build & Deployment Steps
-
+## 3. Build & Start
 ```bash
-# 1. Install production dependencies
-npm ci --omit=dev
-
-# 2. Compile frontend assets
+npm ci
 npm run build
-
-# 3. Create persistent directories with restricted permissions
-sudo mkdir -p /var/turihamwe/backups
-sudo mkdir -p data
-sudo chown -R $USER:$USER data /var/turihamwe/backups
-chmod 700 /var/turihamwe/backups
-
-# 4. Verify test suite passes 100%
 npm test
-
-# 5. Start application with process manager (PM2)
-pm2 start server.ts --name "turihamwe-sacco" --interpreter tsx --time
-pm2 save
-pm2 startup
+npm start
 ```
+The production server serves the compiled PWA frontend (`dist/`), Service Worker (`/sw.js`), Web App Manifest (`/manifest.webmanifest` and `/manifest.json`), and backend REST API on port `3000`.
 
----
-
-## 6. Nginx Reverse Proxy with Let's Encrypt SSL/TLS
-
+## 4. HTTPS Reverse Proxy (Nginx Example)
 ```nginx
-server {
-    listen 80;
-    server_name turihamwe.nyamuyanjasacco.ug;
-    return 301 https://$host$request_uri;
-}
-
 server {
     listen 443 ssl http2;
     server_name turihamwe.nyamuyanjasacco.ug;
 
-    ssl_certificate /etc/letsencrypt/live/turihamwe.nyamuyanjasacco.ug/fullchain.pem;
+    ssl_certificate     /etc/letsencrypt/live/turihamwe.nyamuyanjasacco.ug/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/turihamwe.nyamuyanjasacco.ug/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
 
-    # Security Headers
-    add_header X-Frame-Options "DENY" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    # Max upload size for claim documents (death certificates, medical reports)
     client_max_body_size 15M;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
     }
 }
 ```
+Notice the server enables `app.set('trust proxy', 1)` and allows `X-Working-Branch` in CORS headers cleanly.
 
----
+## 5. Installing as a Desktop / Branch Workstation PWA on Windows
+Once served over HTTPS (or `http://localhost:3000`):
+1. Open the application in **Microsoft Edge** or **Google Chrome**.
+2. Click the in-app **Install App** button (or the browser address bar install icon):
+   - **Microsoft Edge:** Menu (`...`) -> **Apps** -> **Install this site as an app**.
+   - **Google Chrome:** Menu (`⋮`) -> **Save and share** -> **Install page as app**.
+3. Confirm **Install**. Windows creates a Desktop shortcut and Start Menu entry (`Turihamwe Management System`), launching the application in a clean standalone window.
+4. Updates roll out automatically via the service worker (`autoUpdate`) without erasing IndexedDB branch queues (`Turihamwe_Branch_LocalDB`) or active authentication state.
 
-## 7. Pandora Networks Uganda Verification Checklist
-
-1. [ ] Live Pandora Networks Uganda account funded in UGX (`PANDORA_SMS_PHONE_NUMBER` & `PANDORA_SMS_PASSWORD` configured).
-2. [ ] Approved alphanumeric Sender ID (`NYAMUYANJA`) registered with Uganda Communications Commission (UCC).
-3. [ ] All recipient phone numbers converted to Ugandan E.164 (`+256XXXXXXXXX` / `256XXXXXXXXX`).
-4. [ ] Inbound webhook configured for delivery reports (`/api/sms/delivery-report`).
-5. [ ] Offline queue retries capped at 3 attempts with exponential backoff.
+## 6. Offline Operations & Data Protection
+- **Cached by Service Worker:** Static UI shell (HTML, JS bundles, CSS, institutional icons).
+- **Never Cached by Service Worker (`NetworkOnly`):** All `/api/*`, authentication, member, financial, and SMS API responses are strictly `NetworkOnly`.
+- **Offline Operations:** Installed UI loads cleanly offline; branch operations queued via IndexedDB sync once internet returns with duplicate receipt/reference protection (`syncRoutes`).
+- **Online Required:** Initial login verification, live server backups, and Pandora SMS dispatch require active internet connectivity.
+- **Database Recovery Mode:** If `turihamwe_central_db.json` is missing or corrupted, the server stops operational routes cleanly (HTTP `503`), refuses to initialize a blank database over production data, and renders a clear recovery screen for IT staff.

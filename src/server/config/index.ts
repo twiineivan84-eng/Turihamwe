@@ -1,9 +1,20 @@
 import path from 'path';
+import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
 // Load environment variables from .env if present
 dotenv.config();
+
+const configModuleDir =
+  typeof import.meta.dirname !== 'undefined'
+    ? import.meta.dirname
+    : path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(configModuleDir, '..', '..', '..');
+
+function resolveProjectPath(targetPath: string): string {
+  return path.isAbsolute(targetPath) ? targetPath : path.resolve(PROJECT_ROOT, targetPath);
+}
 
 export class ConfigurationError extends Error {
   constructor(public readonly variableName: string, message?: string) {
@@ -187,7 +198,7 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
       rawDataDir = 'data';
     }
   }
-  const dataDir = path.isAbsolute(rawDataDir) ? rawDataDir : path.resolve(process.cwd(), rawDataDir);
+  const dataDir = resolveProjectPath(rawDataDir);
 
   if (isProduction && !isTestEnvironment && !hasExplicitPersistentDir) {
     console.warn(
@@ -202,7 +213,7 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
   const rawSqlitePath = hasExplicitPersistentDir && !env.SQLITE_DATABASE_PATH
     ? defaultSqlitePath
     : cleanEnvVal(env.SQLITE_DATABASE_PATH, defaultSqlitePath);
-  const sqlitePath = path.isAbsolute(rawSqlitePath) ? rawSqlitePath : path.resolve(process.cwd(), rawSqlitePath);
+  const sqlitePath = resolveProjectPath(rawSqlitePath);
 
   // SMS Gateway Configuration (Exclusive Provider: Pandora Networks)
   const smsEnabled = env.SMS_ENABLED !== 'false';
@@ -241,7 +252,7 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
   const rawUploadPath = isTestEnvironment
     ? cleanEnvVal(env.TUR_TEST_UPLOAD_DIR, path.join(dataDir, 'test_uploads'))
     : cleanEnvVal(env.FILE_STORAGE_PATH, path.join(dataDir, 'uploads'));
-  const uploadPath = path.isAbsolute(rawUploadPath) ? rawUploadPath : path.resolve(process.cwd(), rawUploadPath);
+  const uploadPath = resolveProjectPath(rawUploadPath);
   const maxUploadSizeMb = parseInt(env.MAX_UPLOAD_SIZE_MB || '10', 10);
 
   // Backup Configuration (strictly isolated so automated tests NEVER write into production data/backups)
@@ -253,9 +264,7 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
         env.BACKUP_STORAGE_DIR,
         hasExplicitPersistentDir ? defaultProdBackupDir : cleanEnvVal(env.BACKUP_STORAGE_PATH, defaultProdBackupDir)
       );
-  const backupStoragePath = path.isAbsolute(rawBackupStorage)
-    ? rawBackupStorage
-    : path.resolve(process.cwd(), rawBackupStorage);
+  const backupStoragePath = resolveProjectPath(rawBackupStorage);
   const backupEncryptionKey = isPlaceholder(env.BACKUP_ENCRYPTION_KEY) ? undefined : env.BACKUP_ENCRYPTION_KEY;
 
   // Synchronization Configuration
