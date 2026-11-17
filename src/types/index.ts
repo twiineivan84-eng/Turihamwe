@@ -162,6 +162,8 @@ export type AuditAction =
   | 'BENEFICIARY_ADDED'
   | 'BENEFICIARY_UPDATED'
   | 'BENEFICIARY_REMOVED'
+  | 'BENEFICIARY_MARKED_DECEASED'
+  | 'BENEFICIARY_STATUS_CHANGED'
   | 'CONTRIBUTION_RECORDED'
   | 'CONTRIBUTION_CORRECTED'
   | 'RENEWAL_RECORDED'
@@ -368,9 +370,12 @@ export interface TurihamwePlan {
   registeredBranchId: string;
   branchId?: string; // Convenience alias for registeredBranchId in legacy fixtures
   registeredBranchName?: string;
+  branchName?: string;
   registeredByUserId: string;
   registeredByUsername?: string;
   beneficiaryCount?: number;
+  totalBeneficiariesCount?: number;
+  coverageAmount?: number;
   totalContributionsAmount?: number;
   totalContributionsUgx?: number; // Legacy alias for totalContributionsAmount in tests
   lastContributionDate?: string;
@@ -379,6 +384,14 @@ export interface TurihamwePlan {
   createdAt: string; // Record-entry timestamp (stored separately from subscriptionDate)
   updatedAt: string;
 }
+
+export type PermittedBeneficiaryRelationship =
+  | 'BIOLOGICAL CHILD'
+  | 'BIOLOGICAL PARENT'
+  | 'SPOUSE'
+  | 'Biological Child'
+  | 'Biological Parent'
+  | 'Spouse';
 
 export interface Beneficiary {
   id: string;
@@ -391,6 +404,11 @@ export interface Beneficiary {
   contactPhone?: string;
   percentageAllocation: number;
   isActive: boolean;
+  status?: 'ALIVE' | 'DECEASED';
+  isDeceased?: boolean;
+  deceasedDate?: string;
+  deceasedReason?: string;
+  isHistoricalCategory?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -573,7 +591,7 @@ export interface BusinessRulesConfig {
   };
   membershipLimits?: {
     status: 'ACTIVE_POLICY';
-    maxFamilyMembers: number;
+    maxFamilyMembers?: number | null;
     maxBeneficiaryAgeYears: number;
     existingActivePlanExemption: boolean;
     biologicalChildrenOnly: boolean;
@@ -731,6 +749,12 @@ export interface ClaimPaymentInfo {
   recordedByUserId: string;
   recordedByUsername: string;
   recordedAt: string;
+  paidAt?: string;
+  paidByUserId?: string;
+  paidByUsername?: string;
+  paidByFullName?: string;
+  paymentMethod?: string;
+  notes?: string;
 }
 
 export interface ClaimApprovalRejectionRecord {
@@ -743,6 +767,11 @@ export interface ClaimApprovalRejectionRecord {
   decisionDate: string;
   reasonOrReference: string;
   decisionNotes?: string;
+  approvedAt?: string;
+  approvedByUserId?: string;
+  approvedByUsername?: string;
+  approvedByFullName?: string;
+  notes?: string;
 }
 
 export interface TurihamweClaim {
@@ -772,11 +801,22 @@ export interface TurihamweClaim {
   approvalRecord?: ClaimApprovalRejectionRecord;
   rejectionRecord?: ClaimApprovalRejectionRecord;
   paymentInfo?: ClaimPaymentInfo;
+  amount?: number;
+  deceasedName?: string;
+  relationshipToMember?: string;
+  dateOfDeath?: string;
+  dateOfBurial?: string;
+  submissionBranchId?: string;
+  claimantName?: string;
+  claimantRelationship?: string;
+  claimantPhone?: string;
+  documentsSubmitted?: string[];
+  verificationNotes?: string;
   duplicateWarningAcknowledged?: boolean;
   duplicateOverrideReason?: string;
+  isSynced?: boolean;
   createdAt: string;
   updatedAt: string;
-  isSynced?: boolean;
 }
 
 // ==========================================
@@ -835,7 +875,7 @@ export interface SmsMessage {
   sentAt?: string;
   failedAt?: string;
   failureReason?: string;
-  provider: 'AFRICAS_TALKING' | 'PANDORA';
+  provider: 'PANDORA';
   providerMessageId?: string;
   providerCostUGX?: number;
   deliveryStatus?: string;
@@ -870,7 +910,7 @@ export type SmsConfigurationStatus = 'CONFIGURED' | 'MISSING' | 'INVALID' | 'DIS
 export type SmsWorkerStatus = 'RUNNING' | 'STOPPED' | 'PAUSED';
 
 export interface SmsProviderDiagnostics {
-  provider: "Africa's Talking" | "Pandora Networks";
+  provider: 'Pandora Networks';
   environment: 'SANDBOX' | 'PRODUCTION';
   configurationStatus: SmsConfigurationStatus;
   configurationMessage: string;
@@ -944,7 +984,8 @@ export type AlertCategory =
   | 'CLAIM_AWAITING_DOCS'
   | 'SMS_FAILURE'
   | 'SYNC_ERROR'
-  | 'SYSTEM_EVENT';
+  | 'SYSTEM_EVENT'
+  | 'SHARED_BIOLOGICAL_PARENT_DETECTED';
 
 export type AlertStatus = 'UNREAD' | 'READ' | 'RESOLVED';
 
@@ -960,6 +1001,7 @@ export interface SystemAlert {
   recordId?: string;
   requiredPermission?: PermissionCode;
   status: AlertStatus;
+  isRead?: boolean;
   readByUsers: string[];
   resolvedByUserId?: string;
   resolvedAt?: string;
@@ -1116,6 +1158,13 @@ export interface SystemHealthMetrics {
       smsQueue: number;
     };
     lastWriteAt: string;
+    databasePath?: string;
+    databaseDirectory?: string;
+    databaseSizeBytes?: number;
+    databaseSha256?: string;
+    isExternalStorage?: boolean;
+    isPersistent?: boolean;
+    lastBackupSha256?: string;
   };
   localSQLite: {
     status: 'SYNCHRONIZED' | 'PENDING_TRANSACTIONS' | 'OFFLINE';

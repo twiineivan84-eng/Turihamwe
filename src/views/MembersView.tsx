@@ -9,7 +9,12 @@ import { LocalRepository } from '../db/local/localRepository';
 import { ContributionReceiptModal } from '../components/turihamwe/ContributionReceiptModal';
 import { RegisterPlanModal } from '../components/turihamwe/RegisterPlanModal';
 import { notifyRecordChanged, subscribeToRecordChanges } from '../utils/systemEvents';
-import { calculateUgandaAge, MAX_TURIHAMWE_ELIGIBLE_AGE } from '../utils/timezone';
+import {
+  calculateUgandaAge,
+  MAX_TURIHAMWE_ELIGIBLE_AGE,
+  isPermittedBeneficiaryRelationship,
+  formatBeneficiaryRelationship,
+} from '../utils/timezone';
 import {
   Users,
   Search,
@@ -80,6 +85,8 @@ export const MembersView: React.FC<MembersViewProps> = ({
 
   // Notifications & Feedback
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [regModalError, setRegModalError] = useState<string | null>(null);
+  const [benModalError, setBenModalError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   // Registration Beneficiaries & Client Status
@@ -94,6 +101,26 @@ export const MembersView: React.FC<MembersViewProps> = ({
   const [newClientStatus, setNewClientStatus] = useState<'ALIVE' | 'DECEASED'>('ALIVE');
   const [clientStatusReason, setClientStatusReason] = useState<string>('');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<boolean>(false);
+
+  // Beneficiary Management in Profile View
+  const [showAddBeneficiaryModal, setShowAddBeneficiaryModal] = useState<boolean>(false);
+  const [newBenForm, setNewBenForm] = useState({
+    fullName: '',
+    dateOfBirth: '',
+    relationship: 'Biological Child' as 'Biological Child' | 'Biological Parent' | 'Spouse',
+    nationalIdNumber: '',
+    contactPhone: '',
+    percentageAllocation: 100,
+  });
+  const [isSubmittingBeneficiary, setIsSubmittingBeneficiary] = useState<boolean>(false);
+  const [duplicateParentWarning, setDuplicateParentWarning] = useState<string | null>(null);
+
+  // Beneficiary Status Management (Mark Deceased / Alive)
+  const [showBeneficiaryStatusModal, setShowBeneficiaryStatusModal] = useState<boolean>(false);
+  const [statusTargetBeneficiary, setStatusTargetBeneficiary] = useState<Beneficiary | null>(null);
+  const [newBeneficiaryStatus, setNewBeneficiaryStatus] = useState<'ALIVE' | 'DECEASED'>('DECEASED');
+  const [beneficiaryStatusReason, setBeneficiaryStatusReason] = useState<string>('');
+  const [isUpdatingBeneficiaryStatus, setIsUpdatingBeneficiaryStatus] = useState<boolean>(false);
 
   // Registration & Normal Edit form state
   const [formData, setFormData] = useState({
@@ -193,6 +220,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
         registrationDate: new Date().toISOString().split('T')[0],
       });
       setFormErrors({});
+      setRegModalError(null);
       setShowRegisterModal(true);
       onRegisterModalClosed?.();
     }
@@ -496,20 +524,17 @@ export const MembersView: React.FC<MembersViewProps> = ({
   const handleRegisterMember = async (e: React.FormEvent) => {
     e.preventDefault();
     setNotification(null);
+    setRegModalError(null);
 
     if (!canRegister) {
-      setNotification({
-        type: 'error',
-        message: 'Permission Denied: You do not have permission to register SACCO members.',
-      });
+      const msg = 'Permission Denied: You do not have permission to register SACCO members.';
+      setRegModalError(msg);
       return;
     }
 
     if (!validateForm(false)) {
-      setNotification({
-        type: 'error',
-        message: 'Please resolve the highlighted validation errors before submitting.',
-      });
+      const msg = 'Please resolve the highlighted validation errors before submitting.';
+      setRegModalError(msg);
       return;
     }
 
@@ -517,27 +542,32 @@ export const MembersView: React.FC<MembersViewProps> = ({
     for (let i = 0; i < regBeneficiaries.length; i++) {
       const b = regBeneficiaries[i];
       if (!b.fullName.trim()) {
-        setNotification({ type: 'error', message: `Beneficiary #${i + 1}: Full legal name is required.` });
+        setRegModalError(`Beneficiary #${i + 1}: Full legal name is required.`);
         return;
       }
       if (!b.dateOfBirth) {
-        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): Date of birth is required.` });
+        setRegModalError(`Beneficiary #${i + 1} (${b.fullName}): Date of birth is required.`);
         return;
       }
       const ageRes = calculateUgandaAge(b.dateOfBirth);
       if (!ageRes.isValid) {
-        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): ${ageRes.error}` });
+        setRegModalError(`Beneficiary #${i + 1} (${b.fullName}): ${ageRes.error}`);
         return;
       }
       if (!ageRes.isEligibleForTurihamwe) {
-        setNotification({
-          type: 'error',
-          message: `Beneficiary #${i + 1} (${b.fullName}): Beneficiary age (${ageRes.age} years) exceeds the maximum eligible age of ${MAX_TURIHAMWE_ELIGIBLE_AGE} years at initial enrollment under Turihamwe policy.`,
-        });
+        setRegModalError(
+          `Beneficiary #${i + 1} (${b.fullName}): Beneficiary age (${ageRes.age} years) exceeds the maximum eligible age of ${MAX_TURIHAMWE_ELIGIBLE_AGE} years at initial enrollment under Turihamwe policy.`
+        );
         return;
       }
       if (!b.relationship.trim()) {
-        setNotification({ type: 'error', message: `Beneficiary #${i + 1} (${b.fullName}): Relationship to member is required.` });
+        setRegModalError(`Beneficiary #${i + 1} (${b.fullName}): Relationship to member is required.`);
+        return;
+      }
+      if (!isPermittedBeneficiaryRelationship(b.relationship)) {
+        setRegModalError(
+          `Beneficiary #${i + 1} (${b.fullName}): Relationship '${b.relationship}' is not permitted. Only Biological Child, Biological Parent, or Spouse are allowed.`
+        );
         return;
       }
     }
@@ -548,10 +578,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
     const localExisting = await localDb.members.get(cleanAccountNo);
     if (localExisting) {
       // EXACT REQUIRED SPECIFICATION ERROR MESSAGE
-      setNotification({
-        type: 'error',
-        message: 'This SACCO account number is already registered.',
-      });
+      setRegModalError('This SACCO account number is already registered.');
       return;
     }
 
@@ -594,28 +621,44 @@ export const MembersView: React.FC<MembersViewProps> = ({
 
     // Attempt online registration first if connected
     let savedOnline = false;
+    let regDuplicateNoticeMsg = '';
     if (isOnline) {
       try {
         const res = await apiClient.registerMember({
           ...newMember,
-          beneficiaries: regBeneficiaries.map((b, idx) => ({
+          beneficiaries: regBeneficiaries.map((b) => ({
             fullName: b.fullName.trim(),
             dateOfBirth: b.dateOfBirth,
-            relationship: b.relationship.trim(),
+            relationship: formatBeneficiaryRelationship(b.relationship),
             nationalIdNumber: b.nationalIdNumber?.trim() || undefined,
             contactPhone: b.contactPhone?.trim() || undefined,
           })),
         });
         if (res.success && res.data) {
           savedOnline = true;
+          const notices = (res.data as any).duplicateParentNotices || (res as any).duplicateParentNotices;
+          if (Array.isArray(notices) && notices.length > 0) {
+            const names = notices
+              .map((n: any) => `${n.parentName} (also under A/C ${n.existingMemberAccountNumber || n.otherAccountNumber})`)
+              .join(', ');
+            regDuplicateNoticeMsg = `Notice: Biological Parent shared across siblings: ${names}. Legitimate registration approved & logged.`;
+            setDuplicateParentWarning(regDuplicateNoticeMsg);
+          }
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : '';
-        if (errMsg.includes('already registered')) {
-          setNotification({
-            type: 'error',
-            message: 'This SACCO account number is already registered.',
-          });
+        if (
+          errMsg.includes('already registered') ||
+          errMsg.includes('not permitted') ||
+          errMsg.includes('maximum eligible age') ||
+          errMsg.includes('spouse') ||
+          errMsg.includes('Beneficiary')
+        ) {
+          setRegModalError(
+            errMsg.includes('already registered')
+              ? 'This SACCO account number is already registered.'
+              : errMsg
+          );
           return;
         }
       }
@@ -632,12 +675,14 @@ export const MembersView: React.FC<MembersViewProps> = ({
         saccoAccountNumber: cleanAccountNo,
         planId: '',
         fullName: b.fullName.trim(),
-        relationship: b.relationship.trim(),
+        relationship: formatBeneficiaryRelationship(b.relationship),
         dateOfBirth: b.dateOfBirth,
         nationalIdNumber: b.nationalIdNumber?.trim() || undefined,
         contactPhone: b.contactPhone?.trim() || undefined,
         percentageAllocation: Math.floor(100 / (regBeneficiaries.length || 1)),
         isActive: true,
+        status: 'ALIVE',
+        isDeceased: false,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -677,7 +722,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
     setNotification({
       type: 'success',
       message: savedOnline
-        ? `Member ${newMember.fullName} (${newMember.saccoAccountNumber}) registered with status ${newMember.clientStatus} and ${regBeneficiaries.length} beneficiaries.`
+        ? `Member ${newMember.fullName} (${newMember.saccoAccountNumber}) registered with status ${newMember.clientStatus} and ${regBeneficiaries.length} beneficiaries.${regDuplicateNoticeMsg ? ' ' + regDuplicateNoticeMsg : ''}`
         : `Member ${newMember.fullName} (${newMember.saccoAccountNumber}) registered locally. Queued for background synchronization.`,
     });
 
@@ -755,6 +800,125 @@ export const MembersView: React.FC<MembersViewProps> = ({
       setNotification({ type: 'error', message: msg });
     } finally {
       setIsUpdatingStatus(false);
+    }
+  };
+
+  // Add Beneficiary Handler (Authorized staff on Member Profile)
+  const handleAddBeneficiary = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedMember) return;
+    setBenModalError(null);
+    if (!newBenForm.fullName.trim()) {
+      setBenModalError('Beneficiary full legal name is required.');
+      return;
+    }
+    if (!newBenForm.dateOfBirth) {
+      setBenModalError('Beneficiary date of birth is required.');
+      return;
+    }
+    const ageRes = calculateUgandaAge(newBenForm.dateOfBirth);
+    if (!ageRes.isValid) {
+      setBenModalError(ageRes.error || 'Invalid date of birth.');
+      return;
+    }
+    if (!ageRes.isEligibleForTurihamwe) {
+      setBenModalError(
+        `Beneficiary age (${ageRes.age} years) exceeds the maximum eligible enrollment age of ${MAX_TURIHAMWE_ELIGIBLE_AGE} years under Turihamwe policy.`
+      );
+      return;
+    }
+    if (!isPermittedBeneficiaryRelationship(newBenForm.relationship)) {
+      setBenModalError(
+        'Invalid relationship category. Only Biological Child, Biological Parent, or Spouse are permitted.'
+      );
+      return;
+    }
+
+    setIsSubmittingBeneficiary(true);
+    setDuplicateParentWarning(null);
+
+    try {
+      const res = await apiClient.addBeneficiary(selectedMember.saccoAccountNumber, {
+        fullName: newBenForm.fullName.trim(),
+        dateOfBirth: newBenForm.dateOfBirth,
+        relationship: formatBeneficiaryRelationship(newBenForm.relationship),
+        nationalIdNumber: newBenForm.nationalIdNumber?.trim() || undefined,
+        contactPhone: newBenForm.contactPhone?.trim() || undefined,
+        percentageAllocation: Number(newBenForm.percentageAllocation) || 100,
+      });
+
+      if (res.success) {
+        const notice = (res as any).duplicateParentNotice || (res.data as any)?.duplicateParentNotice;
+        if (notice) {
+          const siblingAcc = notice.existingMemberAccountNumber || notice.otherAccountNumber;
+          const siblingName = notice.existingMemberName || notice.otherMemberName;
+          setDuplicateParentWarning(
+            `Notice: ${notice.parentName} is also registered under SACCO A/C ${siblingAcc} (${siblingName}). Sibling registration permitted and logged for supervisory audit.`
+          );
+        }
+        setNotification({
+          type: 'success',
+          message: `Beneficiary ${newBenForm.fullName.trim()} successfully enrolled under Member ${selectedMember.saccoAccountNumber}.`,
+        });
+        setShowAddBeneficiaryModal(false);
+        setBenModalError(null);
+        setNewBenForm({
+          fullName: '',
+          dateOfBirth: '',
+          relationship: 'Biological Child',
+          nationalIdNumber: '',
+          contactPhone: '',
+          percentageAllocation: 100,
+        });
+        await loadMemberHistory(selectedMember);
+      } else {
+        setBenModalError((res as any).message || (res as any).error || 'Failed to add beneficiary.');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error occurred while saving beneficiary.';
+      setBenModalError(msg);
+    } finally {
+      setIsSubmittingBeneficiary(false);
+    }
+  };
+
+  // Update Beneficiary Status (ALIVE / DECEASED with preservation of member plan)
+  const handleUpdateBeneficiaryStatus = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedMember || !statusTargetBeneficiary) return;
+    if (!beneficiaryStatusReason.trim()) {
+      setNotification({ type: 'error', message: 'Mandatory justification / audit reason is required.' });
+      return;
+    }
+
+    setIsUpdatingBeneficiaryStatus(true);
+    try {
+      const res = await apiClient.updateBeneficiaryStatus(
+        selectedMember.saccoAccountNumber,
+        statusTargetBeneficiary.id,
+        newBeneficiaryStatus,
+        beneficiaryStatusReason.trim()
+      );
+
+      if (res.success) {
+        setNotification({
+          type: 'success',
+          message: newBeneficiaryStatus === 'DECEASED'
+            ? `Beneficiary ${statusTargetBeneficiary.fullName} marked as DECEASED. Historical record preserved. Member ${selectedMember.saccoAccountNumber}'s Turihamwe protection plan remains ACTIVE.`
+            : `Beneficiary ${statusTargetBeneficiary.fullName} status updated to ALIVE.`,
+        });
+        setShowBeneficiaryStatusModal(false);
+        setStatusTargetBeneficiary(null);
+        setBeneficiaryStatusReason('');
+        await loadMemberHistory(selectedMember);
+      } else {
+        setNotification({ type: 'error', message: (res as any).message || (res as any).error || 'Failed to update beneficiary status.' });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error updating beneficiary status.';
+      setNotification({ type: 'error', message: msg });
+    } finally {
+      setIsUpdatingBeneficiaryStatus(false);
     }
   };
 
@@ -1154,6 +1318,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
                   registrationDate: new Date().toISOString().split('T')[0],
                 });
                 setFormErrors({});
+                setRegModalError(null);
                 setShowRegisterModal(true);
               }}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold shadow-xs transition"
@@ -1844,12 +2009,47 @@ export const MembersView: React.FC<MembersViewProps> = ({
               {/* Beneficiaries */}
               {profileTab === 'beneficiaries' && canViewTurihamwe && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between pb-1 border-b">
-                    <h3 className="font-bold text-slate-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5 text-blue-700" />
-                      Registered Beneficiaries ({memberBeneficiaries.length})
-                    </h3>
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b">
+                    <div>
+                      <h3 className="font-bold text-slate-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-blue-700" />
+                        Registered Beneficiaries ({memberBeneficiaries.length})
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        No maximum limit. Permitted: Biological Child, Biological Parent, Spouse.
+                      </p>
+                    </div>
+                    {(canEdit || canRegister) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewBenForm({
+                            fullName: '',
+                            dateOfBirth: '',
+                            relationship: 'Biological Child',
+                            nationalIdNumber: '',
+                            contactPhone: '',
+                            percentageAllocation: 100,
+                          });
+                          setBenModalError(null);
+                          setShowAddBeneficiaryModal(true);
+                        }}
+                        className="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        Add Beneficiary
+                      </button>
+                    )}
                   </div>
+
+                  {duplicateParentWarning && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Notice:</strong> {duplicateParentWarning}
+                      </div>
+                    </div>
+                  )}
 
                   {memberBeneficiaries.length === 0 ? (
                     <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-center">
@@ -1858,6 +2058,26 @@ export const MembersView: React.FC<MembersViewProps> = ({
                       <p className="text-[11px] text-slate-500 mt-1 max-w-md mx-auto">
                         No beneficiary records have been enrolled under SACCO Member {selectedMember.saccoAccountNumber}.
                       </p>
+                      {(canEdit || canRegister) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewBenForm({
+                              fullName: '',
+                              dateOfBirth: '',
+                              relationship: 'Biological Child',
+                              nationalIdNumber: '',
+                              contactPhone: '',
+                              percentageAllocation: 100,
+                            });
+                            setBenModalError(null);
+                            setShowAddBeneficiaryModal(true);
+                          }}
+                          className="mt-3 px-3.5 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                        >
+                          Add First Beneficiary
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="overflow-x-auto border border-slate-200 rounded-xl">
@@ -1866,33 +2086,81 @@ export const MembersView: React.FC<MembersViewProps> = ({
                           <tr>
                             <th className="py-2.5 px-3">Beneficiary Name</th>
                             <th className="py-2.5 px-3">Relationship</th>
+                            <th className="py-2.5 px-3">Date of Birth</th>
                             <th className="py-2.5 px-3">National ID (NIN)</th>
                             <th className="py-2.5 px-3">Phone Number</th>
                             <th className="py-2.5 px-3 text-right">Allocation (%)</th>
                             <th className="py-2.5 px-3">Status</th>
+                            {(canEdit || canRegister) && <th className="py-2.5 px-3 text-right">Actions</th>}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
-                          {memberBeneficiaries.map((b) => (
-                            <tr key={b.id} className="hover:bg-slate-50 transition">
-                              <td className="py-2.5 px-3 font-semibold text-slate-900">{b.fullName}</td>
-                              <td className="py-2.5 px-3">
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-800">
-                                  {b.relationship}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-3 font-mono text-[11px] text-slate-700">{b.nationalIdNumber || '—'}</td>
-                              <td className="py-2.5 px-3 font-mono text-[11px] text-slate-700">{b.contactPhone || '—'}</td>
-                              <td className="py-2.5 px-3 text-right font-bold text-blue-900">{b.percentageAllocation || 100}%</td>
-                              <td className="py-2.5 px-3 text-[11px]">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  b.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
-                                }`}>
-                                  {b.isActive ? 'Active' : 'Inactive'}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
+                          {memberBeneficiaries.map((b) => {
+                            const isDeceased = b.status === 'DECEASED' || b.isDeceased;
+                            return (
+                              <tr key={b.id} className={`transition ${isDeceased ? 'bg-slate-50/60' : 'hover:bg-slate-50'}`}>
+                                <td className="py-2.5 px-3">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={isDeceased ? 'line-through text-slate-500 font-semibold' : 'font-semibold text-slate-900'}>
+                                      {b.fullName}
+                                    </span>
+                                    {isDeceased && (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                        DECEASED
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                                    {b.relationship}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-[11px] text-slate-700">{b.dateOfBirth || '—'}</td>
+                                <td className="py-2.5 px-3 font-mono text-[11px] text-slate-700">{b.nationalIdNumber || '—'}</td>
+                                <td className="py-2.5 px-3 font-mono text-[11px] text-slate-700">{b.contactPhone || '—'}</td>
+                                <td className="py-2.5 px-3 text-right font-bold text-blue-900">{b.percentageAllocation || 100}%</td>
+                                <td className="py-2.5 px-3 text-[11px]">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    isDeceased ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  }`}>
+                                    {isDeceased ? 'DECEASED' : 'ALIVE (Active)'}
+                                  </span>
+                                </td>
+                                {(canEdit || canRegister) && (
+                                  <td className="py-2.5 px-3 text-right">
+                                    {isDeceased ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setStatusTargetBeneficiary(b);
+                                          setNewBeneficiaryStatus('ALIVE');
+                                          setBeneficiaryStatusReason('Status restored to ALIVE upon administrative review');
+                                          setShowBeneficiaryStatusModal(true);
+                                        }}
+                                        className="px-2 py-1 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded transition"
+                                      >
+                                        Mark Alive
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setStatusTargetBeneficiary(b);
+                                          setNewBeneficiaryStatus('DECEASED');
+                                          setBeneficiaryStatusReason('');
+                                          setShowBeneficiaryStatusModal(true);
+                                        }}
+                                        className="px-2 py-1 text-[11px] bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded border border-rose-200 transition"
+                                      >
+                                        Mark Deceased
+                                      </button>
+                                    )}
+                                  </td>
+                                )}
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2533,6 +2801,13 @@ export const MembersView: React.FC<MembersViewProps> = ({
                 <strong>Mandatory Specification Rules:</strong> The member's existing SACCO account number is the primary identifier. It must be unique, belongs to only one member, and is never generated or modified by Turihamwe.
               </div>
 
+              {regModalError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <span className="font-semibold">{regModalError}</span>
+                </div>
+              )}
+
               {/* PERSONAL INFORMATION */}
               <div className="space-y-3">
                 <h3 className="font-bold text-slate-800 uppercase tracking-wider text-[11px] pb-1 border-b">
@@ -2793,7 +3068,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
                       Beneficiary Enrolment (Optional, Multiple Allowed)
                     </h3>
                     <p className="text-[10px] text-slate-500">
-                      Enrol family beneficiaries during member registration (Policy 7: Maximum eligible age is 70 years at enrollment; future dates of birth strictly rejected).
+                      Enrol family beneficiaries during member registration (Approved categories: Biological Child, Biological Parent, and Spouse. No numerical limit; Maximum eligible age is 70 years at enrollment).
                     </p>
                   </div>
                   <button
@@ -2804,7 +3079,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
                         {
                           fullName: '',
                           dateOfBirth: '',
-                          relationship: 'Spouse',
+                          relationship: 'Biological Child',
                           nationalIdNumber: '',
                           contactPhone: '',
                         },
@@ -2867,15 +3142,11 @@ export const MembersView: React.FC<MembersViewProps> = ({
                                   prev.map((item, i) => (i === idx ? { ...item, relationship: val } : item))
                                 );
                               }}
-                              className="w-full p-1.5 border border-slate-300 rounded bg-white text-slate-900 text-xs"
+                              className="w-full p-1.5 border border-slate-300 rounded bg-white text-slate-900 text-xs font-semibold"
                             >
+                              <option value="Biological Child">Biological Child</option>
+                              <option value="Biological Parent">Biological Parent</option>
                               <option value="Spouse">Spouse</option>
-                              <option value="Child">Child</option>
-                              <option value="Parent">Parent</option>
-                              <option value="Sibling">Sibling</option>
-                              <option value="Relative">Relative</option>
-                              <option value="Dependent">Dependent</option>
-                              <option value="Other">Other</option>
                             </select>
                           </div>
                           <div>
@@ -3207,6 +3478,250 @@ export const MembersView: React.FC<MembersViewProps> = ({
                   className="px-5 py-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg shadow-xs transition disabled:opacity-50"
                 >
                   {isUpdatingStatus ? 'Saving Status...' : 'Apply Status Change'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Beneficiary Modal */}
+      {showAddBeneficiaryModal && selectedMember && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full border border-slate-200 overflow-hidden">
+            <div className="bg-blue-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-blue-300" />
+                <div>
+                  <h3 className="font-bold text-base leading-tight">Enroll Eligible Beneficiary</h3>
+                  <p className="text-xs text-blue-200">
+                    Member: {selectedMember.fullName} ({selectedMember.saccoAccountNumber})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddBeneficiaryModal(false)}
+                className="text-blue-200 hover:text-white transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAddBeneficiary} className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-900 text-[11px] leading-relaxed">
+                <strong>Turihamwe Beneficiary Policy:</strong> There is NO numerical limit on beneficiaries. Only three approved relationship categories are permitted: <strong>Biological Child</strong>, <strong>Biological Parent</strong>, and <strong>Spouse</strong>. Maximum enrollment age is 70 years.
+              </div>
+
+              {benModalError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <span className="font-semibold">{benModalError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block font-semibold text-slate-800 mb-1">
+                  Full Legal Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newBenForm.fullName}
+                  onChange={e => setNewBenForm(prev => ({ ...prev, fullName: e.target.value }))}
+                  placeholder="e.g. Grace Tumuhimbise"
+                  className="w-full p-2.5 border border-slate-300 rounded-lg bg-white text-slate-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-800 mb-1">
+                    Date of Birth *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={newBenForm.dateOfBirth}
+                    onChange={e => setNewBenForm(prev => ({ ...prev, dateOfBirth: e.target.value }))}
+                    className="w-full p-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 font-mono"
+                  />
+                  {newBenForm.dateOfBirth && (
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      Age: {calculateUgandaAge(newBenForm.dateOfBirth).age} years
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-800 mb-1">
+                    Relationship Category *
+                  </label>
+                  <select
+                    value={newBenForm.relationship}
+                    onChange={e => setNewBenForm(prev => ({ ...prev, relationship: e.target.value as any }))}
+                    className="w-full p-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 font-semibold"
+                  >
+                    <option value="Biological Child">Biological Child</option>
+                    <option value="Biological Parent">Biological Parent</option>
+                    <option value="Spouse">Spouse</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-800 mb-1">
+                    National ID (NIN)
+                  </label>
+                  <input
+                    type="text"
+                    value={newBenForm.nationalIdNumber}
+                    onChange={e => setNewBenForm(prev => ({ ...prev, nationalIdNumber: e.target.value.toUpperCase() }))}
+                    placeholder="e.g. CM80012345678A"
+                    className="w-full p-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-800 mb-1">
+                    Contact Phone Number
+                  </label>
+                  <input
+                    type="text"
+                    value={newBenForm.contactPhone}
+                    onChange={e => setNewBenForm(prev => ({ ...prev, contactPhone: e.target.value }))}
+                    placeholder="e.g. 0772123456"
+                    className="w-full p-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-800 mb-1">
+                  Percentage Allocation (%)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={newBenForm.percentageAllocation}
+                  onChange={e => setNewBenForm(prev => ({ ...prev, percentageAllocation: Number(e.target.value) }))}
+                  className="w-full p-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 font-mono"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setShowAddBeneficiaryModal(false)}
+                  disabled={isSubmittingBeneficiary}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingBeneficiary}
+                  className="px-5 py-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg shadow-xs transition disabled:opacity-50"
+                >
+                  {isSubmittingBeneficiary ? 'Saving...' : 'Enroll Beneficiary'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Beneficiary Status Modal (Mark Deceased / Alive) */}
+      {showBeneficiaryStatusModal && statusTargetBeneficiary && selectedMember && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className={`px-6 py-4 text-white flex items-center justify-between ${
+              newBeneficiaryStatus === 'DECEASED' ? 'bg-rose-700' : 'bg-slate-800'
+            }`}>
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-white" />
+                <h3 className="font-bold text-base">
+                  {newBeneficiaryStatus === 'DECEASED' ? 'Mark Beneficiary as Deceased' : 'Update Beneficiary Status'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBeneficiaryStatusModal(false);
+                  setStatusTargetBeneficiary(null);
+                  setBeneficiaryStatusReason('');
+                }}
+                className="text-white/80 hover:text-white transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateBeneficiaryStatus} className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+                <div>
+                  <span className="text-slate-500">Beneficiary:</span>{' '}
+                  <strong className="text-slate-900">{statusTargetBeneficiary.fullName}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-500">Relationship:</span>{' '}
+                  <span className="font-semibold text-slate-800">{statusTargetBeneficiary.relationship}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">Account Owner:</span>{' '}
+                  <span className="font-semibold text-slate-800">{selectedMember.fullName} ({selectedMember.saccoAccountNumber})</span>
+                </div>
+              </div>
+
+              {newBeneficiaryStatus === 'DECEASED' ? (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] leading-relaxed">
+                  <strong>Policy Assurance:</strong> Marking this beneficiary as DECEASED preserves their full historical record and audit trail. The member's Turihamwe protection plan will <strong>REMAIN ACTIVE</strong> for all other registered family members.
+                </div>
+              ) : (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-[11px]">
+                  Restoring beneficiary status to ALIVE (Active).
+                </div>
+              )}
+
+              <div>
+                <label className="block font-semibold text-slate-800 mb-1">
+                  Mandatory Audit Reason / Justification *
+                </label>
+                <textarea
+                  value={beneficiaryStatusReason}
+                  onChange={e => setBeneficiaryStatusReason(e.target.value)}
+                  placeholder="e.g. Official notification of death confirmed by family / local council certificate."
+                  required
+                  rows={3}
+                  className="w-full p-2.5 border border-slate-300 rounded-lg bg-white text-slate-900 text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBeneficiaryStatusModal(false);
+                    setStatusTargetBeneficiary(null);
+                    setBeneficiaryStatusReason('');
+                  }}
+                  disabled={isUpdatingBeneficiaryStatus}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingBeneficiaryStatus || !beneficiaryStatusReason.trim()}
+                  className={`px-5 py-2 text-white font-semibold rounded-lg shadow-xs transition disabled:opacity-50 ${
+                    newBeneficiaryStatus === 'DECEASED'
+                      ? 'bg-rose-700 hover:bg-rose-800'
+                      : 'bg-emerald-700 hover:bg-emerald-800'
+                  }`}
+                >
+                  {isUpdatingBeneficiaryStatus ? 'Saving...' : (newBeneficiaryStatus === 'DECEASED' ? 'Confirm Deceased' : 'Set Alive')}
                 </button>
               </div>
             </form>

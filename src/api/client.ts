@@ -338,10 +338,67 @@ class ApiClient {
       nationalIdNumber?: string;
       contactPhone?: string;
     }>;
-  }): Promise<{ success: boolean; data: SaccoMember }> {
+  }): Promise<{ success: boolean; data: SaccoMember; duplicateParentNotices?: any[] }> {
     return this.request('/members', {
       method: 'POST',
       body: JSON.stringify(memberData),
+    });
+  }
+
+  public async addBeneficiary(
+    accountNumber: string,
+    beneficiaryData: {
+      fullName: string;
+      relationship: string;
+      dateOfBirth: string;
+      nationalIdNumber?: string;
+      contactPhone?: string;
+      percentageAllocation?: number;
+    }
+  ): Promise<{ success: boolean; data: Beneficiary; duplicateParentNotice?: any }> {
+    return this.request(`/members/${encodeURIComponent(accountNumber)}/beneficiaries`, {
+      method: 'POST',
+      body: JSON.stringify(beneficiaryData),
+    });
+  }
+
+  public async updateBeneficiary(
+    accountNumber: string,
+    beneficiaryId: string,
+    updates: Partial<Beneficiary>
+  ): Promise<{ success: boolean; data: Beneficiary }> {
+    return this.request(`/members/${encodeURIComponent(accountNumber)}/beneficiaries/${encodeURIComponent(beneficiaryId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  public async updateBeneficiaryStatus(
+    accountNumber: string,
+    beneficiaryId: string,
+    status: 'ALIVE' | 'DECEASED',
+    reason?: string
+  ): Promise<{ success: boolean; message: string; data: Beneficiary }> {
+    return this.request(`/members/${encodeURIComponent(accountNumber)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, reason }),
+    });
+  }
+
+  public async bulkAddBeneficiaries(
+    accountNumber: string,
+    beneficiaries: Array<{
+      fullName: string;
+      relationship: string;
+      dateOfBirth: string;
+      nationalIdNumber?: string;
+      contactPhone?: string;
+      percentageAllocation?: number;
+    }>
+  ): Promise<{ success: boolean; data: Beneficiary[]; duplicateNotices?: any[] }> {
+    return this.request(`/members/${encodeURIComponent(accountNumber)}/beneficiaries/bulk`, {
+      method: 'POST',
+      body: JSON.stringify({ beneficiaries }),
     });
   }
 
@@ -352,7 +409,7 @@ class ApiClient {
   ): Promise<{ success: boolean; data: SaccoMember; message?: string }> {
     return this.request(`/members/${encodeURIComponent(accountNumber)}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ clientStatus: status, reason }),
+      body: JSON.stringify({ status, reason }),
     });
   }
 
@@ -595,7 +652,8 @@ class ApiClient {
       headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
     });
     if (!res.ok) {
-      throw new Error(`Download failed with status HTTP ${res.status}`);
+      const errData = await res.json().catch(() => null);
+      throw new Error(errData?.message || `Download failed with status HTTP ${res.status}`);
     }
     const blob = await res.blob();
     const disposition = res.headers.get('content-disposition');
@@ -606,6 +664,27 @@ class ApiClient {
     }
     const checksum = res.headers.get('x-backup-checksum') || undefined;
     return { blob, filename, checksum };
+  }
+
+  public async downloadAllBackups(): Promise<{ blob: Blob; filename: string; count: number }> {
+    const url = `${API_BASE}/system/backups/download-all`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => null);
+      throw new Error(errData?.message || `Download failed with status HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('content-disposition');
+    let filename = `NYAMUYANJA_TURIHAMWE_ALL_BACKUPS_${new Date().toISOString().slice(0, 10)}.json`;
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) filename = match[1];
+    }
+    const count = parseInt(res.headers.get('x-backup-count') || '0', 10) || 0;
+    return { blob, filename, count };
   }
 
   public async deleteBackup(backupId: string): Promise<{ success: boolean; message: string; data?: BackupRecord }> {
@@ -665,6 +744,39 @@ class ApiClient {
   // --- System Health & Monitoring (Phase 7) ---
   public async getSystemHealth(): Promise<{ success: boolean; data: SystemHealthMetrics }> {
     return this.request('/system/health');
+  }
+
+  public async getDatabaseInfo(): Promise<{
+    success: boolean;
+    data: {
+      databaseFilePath: string;
+      databaseDirectory: string;
+      storageEngine: string;
+      isExternalStorage: boolean;
+      isTestEnvironment: boolean;
+      databaseSizeBytes: number;
+      databaseSha256: string;
+      lastWriteAt: string;
+      recordCounts: Record<string, number>;
+      institutionalStaffAccounts: Array<{
+        id: string;
+        username: string;
+        fullName: string;
+        roleName: string;
+        isActive: boolean;
+        primaryBranchId: string;
+        hasMultiBranchAccess: boolean;
+      }>;
+      dataProtection: {
+        productionLock: string;
+        staffAccountPreservation: string;
+        testDatabaseIsolation: string;
+        lastVerifiedBackupChecksum: string | null;
+        lastVerifiedBackupDate: string | null;
+      };
+    };
+  }> {
+    return this.request('/system/database-info');
   }
 
   public async getSyncMonitoring(branchId?: string): Promise<{
@@ -1052,7 +1164,7 @@ class ApiClient {
     return this.request(`/reports/logs${qs}`);
   }
 
-  // --- SMS Notifications & Africa's Talking (Phase 6) ---
+  // --- SMS Notifications & Pandora Networks (Phase 6) ---
   public async getSmsTemplates(category?: string): Promise<{
     success: boolean;
     data: SmsTemplate[];

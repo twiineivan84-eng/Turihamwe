@@ -24,11 +24,12 @@
 | `DATA_STORAGE_DIR` | Optional | No | Server State Engine | Directory path for local database files | `./data` |
 | `DATA_FILE_NAME` | Optional | No | Server State Engine | Central persistent JSON snapshot state file | `turihamwe_central_db.json` |
 | `SMS_ENABLED` | Optional | No | SMS Engine (`smsService.ts`) | Master toggle for SMS dispatch (`true`/`false`) | `true` |
-| `SMS_ENVIRONMENT` | Optional | No | SMS Engine (`smsService.ts`) | Africa's Talking gateway environment (`SANDBOX`/`PRODUCTION`) | `SANDBOX` |
-| `AT_USERNAME` | Required if Live SMS | No | SMS Engine (`smsService.ts`) | Africa's Talking account username (`sandbox` or SACCO live username) | `sandbox` |
-| `AT_API_KEY` | Required if Live SMS | **Yes** | SMS Engine (`smsService.ts`) | Africa's Talking live API key for Uganda SMS | `atsk_live_xxxxxxxxxxxxxxxx` |
-| `AFRICAS_TALKING_API_KEY` | Optional | **Yes** | SMS Engine (`smsService.ts`) | Compatibility alias for `AT_API_KEY` | `atsk_live_xxxxxxxxxxxxxxxx` |
-| `AT_SENDER_ID` | Optional | No | SMS Engine (`smsService.ts`) | UCC approved alphanumeric Sender ID | `TURIHAMWE` |
+| `SMS_PROVIDER` | Optional | No | SMS Engine (`smsService.ts`) | Exclusive SMS gateway provider (`PANDORA`) | `PANDORA` |
+| `PANDORA_SMS_API_URL` | Optional | No | Pandora Adapter (`pandoraAdapter.ts`) | Pandora Networks SMS submission endpoint | `https://www.sms.thepandoranetworks.com/API/send_sms/` |
+| `PANDORA_SMS_BALANCE_URL` | Optional | No | Pandora Adapter (`pandoraAdapter.ts`) | Pandora Networks balance inquiry endpoint | `https://www.sms.thepandoranetworks.com/API/balance_inquiry.php` |
+| `PANDORA_SMS_PHONE_NUMBER` | Required if Live SMS | No | Pandora Adapter (`pandoraAdapter.ts`) | Registered Pandora Networks account phone number | `256701000000` |
+| `PANDORA_SMS_PASSWORD` | Required if Live SMS | **Yes** | Pandora Adapter (`pandoraAdapter.ts`) | Pandora Networks account password | `your_pandora_password_here` |
+| `PANDORA_SMS_SENDER_ID` | Optional | No | Pandora Adapter (`pandoraAdapter.ts`) | UCC approved alphanumeric Sender ID (max 11 chars) | `NYAMUYANJA` |
 | `FILE_STORAGE_PATH` | Optional | No | Claim Documents (`config/index.ts`) | Directory for claim verification uploads | `./data/uploads` |
 | `MAX_UPLOAD_SIZE_MB` | Optional | No | Claim Uploads & Express Middleware | Max file upload limit in megabytes | `10` |
 | `BACKUP_ENABLED` | Optional | No | Backup Engine (`serverStore.ts`) | Enables automated database snapshots | `true` |
@@ -48,8 +49,8 @@
 The system is built to be **fully operational in development out of the box** without external cloud databases or live cellular networks.
 - `NODE_ENV=development`
 - `PORT=3000`
-- `SMS_ENVIRONMENT=SANDBOX`
-- `AT_USERNAME=sandbox`
+- `SMS_PROVIDER=PANDORA`
+- `PANDORA_SMS_SENDER_ID=NYAMUYANJA`
 - `SQLITE_DATABASE_PATH=./data/turihamwe-local.sqlite`
 - `VITE_API_BASE_URL=/api`
 
@@ -59,26 +60,25 @@ In production, strict validation guarantees that the system refuses to start in 
 - `JWT_SECRET`: Mandatory ($\ge 32$ characters). The dev fallback is rejected in production.
 - `DATABASE_URL` (or `PGHOST` + `PGDATABASE`): Mandatory for centralized PostgreSQL persistence.
 - `APP_URL`: Canonical public HTTPS URL for CORS and notification callbacks.
-- `AT_USERNAME` & `AT_API_KEY`: Mandatory if `SMS_ENVIRONMENT=PRODUCTION` and `SMS_ENABLED=true`.
+- `PANDORA_SMS_PHONE_NUMBER` & `PANDORA_SMS_PASSWORD`: Mandatory when `SMS_ENABLED=true` for live Pandora Networks dispatch.
 
 ### Secret Variables (Never Exposed to Frontend / Browser)
 The following variables are kept strictly on the Node.js server and must **never** be prefixed with `VITE_` or bundled into client code:
 - `JWT_SECRET`
 - `DATABASE_URL`
 - `PGPASSWORD`
-- `AT_API_KEY`
-- `AFRICAS_TALKING_API_KEY`
+- `PANDORA_SMS_PASSWORD`
 - `BACKUP_ENCRYPTION_KEY`
 
 ### Administrator-Provided Variables
 When deploying the application to live infrastructure for Nyamuyanja SACCO Ltd, the administrator must supply:
 1. **Central PostgreSQL Database**: `DATABASE_URL` pointing to the SACCO's isolated PostgreSQL database.
 2. **Production JWT Signing Secret**: `JWT_SECRET` (generate with `openssl rand -hex 32`).
-3. **Africa's Talking Uganda Live Gateway**:
-   - `SMS_ENVIRONMENT=PRODUCTION`
-   - `AT_USERNAME` (SACCO's registered Africa's Talking account name)
-   - `AT_API_KEY` (Generated from Africa's Talking console)
-   - `AT_SENDER_ID=TURIHAMWE` (Registered with Uganda Communications Commission)
+3. **Pandora Networks Uganda Live Gateway**:
+   - `SMS_PROVIDER=PANDORA`
+   - `PANDORA_SMS_PHONE_NUMBER` (SACCO's registered Pandora Networks phone number)
+   - `PANDORA_SMS_PASSWORD` (Pandora Networks account password)
+   - `PANDORA_SMS_SENDER_ID=NYAMUYANJA` (Registered with Uganda Communications Commission)
 4. **Disaster Recovery Passphrase**: `BACKUP_ENCRYPTION_KEY`.
 
 ---

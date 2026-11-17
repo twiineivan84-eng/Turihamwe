@@ -4,7 +4,7 @@ import { TurihamwePlan, SaccoMember, TurihamweRegistrationType } from '../../typ
 import { LocalRepository } from '../../db/local/localRepository';
 import { localDb } from '../../db/local/sqliteEngine';
 import { notifyRecordChanged } from '../../utils/systemEvents';
-import { calculateAnnualMaturityDate, calculateUgandaAge, MAX_NEW_TURIHAMWE_ENROLMENT_AGE, MAX_TURIHAMWE_ELIGIBLE_AGE } from '../../utils/timezone';
+import { calculateAnnualMaturityDate, calculateUgandaAge, getUgandaDateString, MAX_NEW_TURIHAMWE_ENROLMENT_AGE, MAX_TURIHAMWE_ELIGIBLE_AGE } from '../../utils/timezone';
 import { ExistingMemberVerificationModal } from './ExistingMemberVerificationModal';
 import { ShieldCheck, X, CheckCircle2, AlertCircle, Calendar, DollarSign, Info } from 'lucide-react';
 
@@ -113,14 +113,14 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
       setMemberDob(preselectedMember.dateOfBirth);
       setSaccoAccountNumber(preselectedMember.saccoAccountNumber);
       checkForExistingPlan(preselectedMember.saccoAccountNumber, preselectedMember.dateOfBirth);
-      // For fresh registration, if no subscription date yet, leave empty or default to today without forcing
+      // For fresh registration, if no subscription date yet, default to Uganda current date
       if (!subscriptionDate) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = getUgandaDateString(new Date());
         setSubscriptionDate(today);
         setMaturityDate(calculateAnnualMaturityDate(today));
       }
     } else if (isOpen && !subscriptionDate) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getUgandaDateString(new Date());
       setSubscriptionDate(today);
       setMaturityDate(calculateAnnualMaturityDate(today));
     }
@@ -220,7 +220,10 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
             'x-working-branch': workingBranch?.id || '',
           },
         });
-        if (res.ok) found = await res.json();
+        if (res.ok) {
+          const json = await res.json();
+          found = json?.data || (json?.saccoAccountNumber ? json : null);
+        }
       } catch {
         // Fallback to local
       }
@@ -354,7 +357,7 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
       // If Date of Birth was altered, record authorized member correction to audit trail (Section 6)
       if (memberDob && memberDob !== member.dateOfBirth) {
         try {
-          await fetch(`/api/members/${member.saccoAccountNumber}/corrections`, {
+          await fetch(`/api/members/${member.saccoAccountNumber}/correction`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -575,7 +578,7 @@ export const RegisterPlanModal: React.FC<RegisterPlanModalProps> = ({
                   )}
                 </div>
 
-                {isEditingDob && memberDob !== member.dateOfBirth && (
+                {memberDob && memberDob !== member.dateOfBirth && (
                   <div className="pt-1.5 border-t border-slate-200/60">
                     <input
                       type="text"

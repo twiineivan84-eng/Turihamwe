@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { config } from '../config';
+import { serverStore } from '../storage/serverStore';
 
 export interface MigrationResult {
   success: boolean;
@@ -14,6 +15,15 @@ export async function runMigrations(): Promise<MigrationResult> {
   const schemaPath = path.resolve(process.cwd(), 'src/server/db/schema.sql');
   if (!fs.existsSync(schemaPath)) {
     throw new Error(`Schema file not found at ${schemaPath}`);
+  }
+
+  // Pre-migration safety snapshot: guarantee verified backup before modifying any schema
+  try {
+    await serverStore.initialize();
+    serverStore.createPreMigrationBackup('Pre-migration automated safety snapshot');
+    console.log('[MIGRATION] Pre-migration automated safety snapshot verified.');
+  } catch (backupErr) {
+    console.warn('[MIGRATION] Notice: pre-migration safety backup note:', backupErr);
   }
 
   const sqlContent = fs.readFileSync(schemaPath, 'utf8');

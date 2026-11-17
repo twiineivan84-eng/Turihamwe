@@ -25,9 +25,14 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
-# Set production environment
+# Set production environment & persistent storage paths
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV DATA_STORAGE_DIR=/app/data
+ENV TUR_PERSISTENT_DATA_DIR=/app/data
+ENV BACKUP_STORAGE_DIR=/app/data/backups
+ENV FILE_STORAGE_PATH=/app/data/uploads
+ENV SQLITE_DATABASE_PATH=/app/data/turihamwe-local.sqlite
 
 # Install production dependencies only
 COPY package.json package-lock.json* bun.lock* ./
@@ -40,6 +45,7 @@ COPY --from=builder /app/server.ts ./server.ts
 COPY --from=builder /app/src/server ./src/server
 COPY --from=builder /app/src/types ./src/types
 COPY --from=builder /app/src/constants ./src/constants
+COPY --from=builder /app/src/utils ./src/utils
 COPY --from=builder /app/.env.example ./.env.example
 
 # Create persistent storage directories

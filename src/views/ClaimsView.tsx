@@ -1855,7 +1855,7 @@ export const ClaimsView: React.FC = () => {
                     <option value="">-- None (Claim relates to principal member directly) --</option>
                     {planBeneficiaries.map(b => (
                       <option key={b.id} value={b.id}>
-                        {b.fullName} ({b.relationship}) - {b.percentageAllocation}% Allocation
+                        {b.fullName} ({b.relationship}) - {b.percentageAllocation}% Allocation{(b.status === 'DECEASED' || b.isDeceased) ? ' [DECEASED]' : ''}
                       </option>
                     ))}
                   </select>

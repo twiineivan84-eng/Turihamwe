@@ -273,7 +273,7 @@ smsRouter.post('/send', requirePermission('sms.send'), async (req: Authenticated
     res.json({
       success: dispatchResult.success,
       data: dispatchResult.message,
-      message: dispatchResult.success ? 'SMS dispatched successfully via Africa\'s Talking.' : `SMS queued with failure: ${dispatchResult.error}`,
+      message: dispatchResult.success ? 'SMS dispatched successfully via Pandora Networks.' : `SMS queued with failure: ${dispatchResult.error}`,
     });
     return;
   }

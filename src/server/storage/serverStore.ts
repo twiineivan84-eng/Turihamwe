@@ -120,13 +120,13 @@ export const DEFAULT_BUSINESS_RULES: BusinessRulesConfig = {
   },
   membershipLimits: {
     status: 'ACTIVE_POLICY',
-    maxFamilyMembers: 13,
+    maxFamilyMembers: null,
     maxBeneficiaryAgeYears: 70,
     existingActivePlanExemption: true,
     biologicalChildrenOnly: true,
     biologicalParentsOnly: true,
     singleSpouseOnly: true,
-    notes: 'Maximum 13 family members per plan. Maximum beneficiary age 70 years (enforced by date of birth during enrollment; existing active members exempted). Biological children and parents only. Max 1 spouse/wife.',
+    notes: 'No maximum limit on family members per plan. Former 13-member limit removed. Maximum beneficiary age 70 years (enforced by date of birth during enrollment; existing active members exempted). Permitted relationships strictly limited to: Biological Child, Biological Parent, and Spouse.',
   },
   saccoAccountNumberPermanence: {
     status: 'ACTIVE_POLICY',
@@ -199,6 +199,16 @@ export const DEFAULT_BUSINESS_RULES: BusinessRulesConfig = {
 const DATA_DIR = config.database.dataDir;
 const DATA_FILE = config.database.dataFile;
 const BACKUPS_DIR = config.backup.storagePath;
+
+export class DatabaseConnectionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DatabaseConnectionError';
+  }
+}
+
+export const PROTECTED_ROOT_ADMIN_USERNAMES = ['ivan'];
+export const PROTECTED_ROOT_ADMIN_USER_IDS = ['usr-it-ivan'];
 
 export const DEFAULT_BACKUP_CONFIG: BackupConfig = {
   scheduledBackupsEnabled: true,
@@ -277,68 +287,137 @@ export class ServerStore {
   };
 
   private initialized = false;
+  private dbConnectionError: string | null = null;
+  private readonly dataDirPath: string;
+  private readonly dataFilePath: string;
+  private readonly backupsDirPath: string;
+  private readonly allowEmptyInit?: boolean;
 
-  public async initialize(): Promise<void> {
+  constructor(paths?: {
+    dataDir?: string;
+    dataFile?: string;
+    backupsDir?: string;
+    allowEmptyInit?: boolean;
+  }) {
+    this.dataDirPath = paths?.dataDir || DATA_DIR;
+    this.dataFilePath = paths?.dataFile || DATA_FILE;
+    this.backupsDirPath = paths?.backupsDir || BACKUPS_DIR;
+    this.allowEmptyInit = paths?.allowEmptyInit;
+    this.state.backupConfig.backupStorageLocation = this.backupsDirPath;
+  }
+
+  public isDatabaseHealthy(): boolean {
+    return this.initialized && !this.dbConnectionError;
+  }
+
+  public getDatabaseError(): string | null {
+    return this.dbConnectionError;
+  }
+
+  public async initialize(options?: { isTestEnv?: boolean; allowCreateNewDb?: boolean }): Promise<void> {
     if (this.initialized) return;
 
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    const isTestEnv =
+      options?.isTestEnv ?? (process.env.TUR_TEST_ENV === 'true' || process.env.NODE_ENV === 'test');
+    const allowCreateNewDb =
+      options?.allowCreateNewDb ??
+      this.allowEmptyInit ??
+      (isTestEnv || process.env.INIT_NEW_SACCO_DB === 'true');
+
+    if (!fs.existsSync(this.dataFilePath)) {
+      if (!allowCreateNewDb) {
+        const msg = `DATABASE CONNECTION ERROR: Production database file does not exist at '${this.dataFilePath}'. Refusing to silently create an empty database or insert sample/fallback records.`;
+        this.dbConnectionError = msg;
+        throw new DatabaseConnectionError(msg);
+      }
     }
-    if (!fs.existsSync(BACKUPS_DIR)) {
-      fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+
+    if (!fs.existsSync(this.dataDirPath)) {
+      fs.mkdirSync(this.dataDirPath, { recursive: true });
+    }
+    if (!fs.existsSync(this.backupsDirPath)) {
+      fs.mkdirSync(this.backupsDirPath, { recursive: true });
     }
     if (!fs.existsSync(config.storage.uploadPath)) {
       fs.mkdirSync(config.storage.uploadPath, { recursive: true });
     }
 
-    if (fs.existsSync(DATA_FILE)) {
+    if (fs.existsSync(this.dataFilePath)) {
+      let parsed: any;
       try {
-        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-        const parsed = JSON.parse(raw);
-        this.state = {
-          branches: parsed.branches || [],
-          permissions: parsed.permissions || [],
-          roles: parsed.roles || [],
-          users: parsed.users || [],
-          members: parsed.members || [],
-          corrections: parsed.corrections || [],
-          plans: parsed.plans || [],
-          beneficiaries: parsed.beneficiaries || [],
-          contributions: parsed.contributions || [],
-          renewals: parsed.renewals || [],
-          reactivations: parsed.reactivations || [],
-          claims: parsed.claims || [],
-          smsTemplates: parsed.smsTemplates || [],
-          smsQueue: parsed.smsQueue || [],
-          notificationEvents: parsed.notificationEvents || [],
-          alerts: parsed.alerts || [],
-          reportHistory: parsed.reportHistory || [],
-          auditLogs: parsed.auditLogs || [],
-          syncRecords: parsed.syncRecords || [],
-          systemSettings: parsed.systemSettings || this.state.systemSettings,
-          businessRulesConfig: { ...DEFAULT_BUSINESS_RULES, ...(parsed.businessRulesConfig || {}) },
-          backups: parsed.backups || [],
-          backupConfig: { ...DEFAULT_BACKUP_CONFIG, ...(parsed.backupConfig || {}) },
-          deletedUserIds: Array.isArray(parsed.deletedUserIds) ? parsed.deletedUserIds : [],
-          deletedUserUsernames: Array.isArray(parsed.deletedUserUsernames) ? parsed.deletedUserUsernames : [],
-        };
-      } catch (err) {
-        console.error('Failed reading existing store file, initializing fresh:', err);
+        const raw = fs.readFileSync(this.dataFilePath, 'utf-8');
+        parsed = JSON.parse(raw);
+      } catch (err: any) {
+        const msg = `DATABASE CORRUPTION ERROR: Failed to read or parse database at '${this.dataFilePath}' (${err?.message || 'invalid JSON'}). Refusing to overwrite existing database with empty or sample data.`;
+        this.dbConnectionError = msg;
+        throw new DatabaseConnectionError(msg);
+      }
+
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        !Array.isArray(parsed.branches) ||
+        !Array.isArray(parsed.users) ||
+        !Array.isArray(parsed.members)
+      ) {
+        const msg = `DATABASE SCHEMA ERROR: Database file '${this.dataFilePath}' is missing required core collections (branches, users, members). Refusing to overwrite with fallback data.`;
+        this.dbConnectionError = msg;
+        throw new DatabaseConnectionError(msg);
+      }
+
+      this.state = {
+        branches: parsed.branches || [],
+        permissions: parsed.permissions || [],
+        roles: parsed.roles || [],
+        users: parsed.users || [],
+        members: parsed.members || [],
+        corrections: parsed.corrections || [],
+        plans: parsed.plans || [],
+        beneficiaries: parsed.beneficiaries || [],
+        contributions: parsed.contributions || [],
+        renewals: parsed.renewals || [],
+        reactivations: parsed.reactivations || [],
+        claims: parsed.claims || [],
+        smsTemplates: parsed.smsTemplates || [],
+        smsQueue: parsed.smsQueue || [],
+        notificationEvents: parsed.notificationEvents || [],
+        alerts: parsed.alerts || [],
+        reportHistory: parsed.reportHistory || [],
+        auditLogs: parsed.auditLogs || [],
+        syncRecords: parsed.syncRecords || [],
+        systemSettings: parsed.systemSettings || this.state.systemSettings,
+        businessRulesConfig: { ...DEFAULT_BUSINESS_RULES, ...(parsed.businessRulesConfig || {}) },
+        backups: parsed.backups || [],
+        backupConfig: { ...DEFAULT_BACKUP_CONFIG, ...(parsed.backupConfig || {}) },
+        deletedUserIds: Array.isArray(parsed.deletedUserIds) ? parsed.deletedUserIds : [],
+        deletedUserUsernames: Array.isArray(parsed.deletedUserUsernames) ? parsed.deletedUserUsernames : [],
+      };
+      // Enforce removal of former 13-member limit across all loaded states
+      if (this.state.businessRulesConfig?.membershipLimits) {
+        this.state.businessRulesConfig.membershipLimits.maxFamilyMembers = null;
       }
     }
 
-    // Reconstruct deleted user manifests from historical audit logs to ensure past administrative deletions persist
+    // Reconstruct deleted user manifests from historical audit logs (root IT account 'ivan' cannot be tombstoned)
     this.state.deletedUserIds = this.state.deletedUserIds || [];
     this.state.deletedUserUsernames = this.state.deletedUserUsernames || [];
     for (const log of this.state.auditLogs) {
       if (log.action === 'USER_DELETED') {
-        if (log.recordId && !this.state.deletedUserIds.includes(log.recordId)) {
+        if (
+          log.recordId &&
+          !PROTECTED_ROOT_ADMIN_USER_IDS.includes(log.recordId) &&
+          !this.state.deletedUserIds.includes(log.recordId)
+        ) {
           this.state.deletedUserIds.push(log.recordId);
         }
         if (log.previousValue) {
           try {
             const prev = JSON.parse(log.previousValue);
-            if (prev.username && !this.state.deletedUserUsernames.includes(prev.username.toLowerCase())) {
+            if (
+              prev.username &&
+              !PROTECTED_ROOT_ADMIN_USERNAMES.includes(prev.username.toLowerCase()) &&
+              !this.state.deletedUserUsernames.includes(prev.username.toLowerCase())
+            ) {
               this.state.deletedUserUsernames.push(prev.username.toLowerCase());
             }
           } catch {}
@@ -346,9 +425,7 @@ export class ServerStore {
       }
     }
 
-    // Part B requirement: Ensure dummy account itadm is permanently tombstoned and non-resurrectable
-    this.state.deletedUserUsernames = this.state.deletedUserUsernames || [];
-    this.state.deletedUserIds = this.state.deletedUserIds || [];
+    // Ensure dummy legacy account 'itadm' remains permanently tombstoned if referenced
     if (!this.state.deletedUserUsernames.includes('itadm')) {
       this.state.deletedUserUsernames.push('itadm');
     }
@@ -356,7 +433,8 @@ export class ServerStore {
       this.state.deletedUserIds.push('usr-it-01');
     }
 
-    // Durably purge any deleted users from in-memory state
+    // Durably filter any tombstoned users from in-memory active users
+    // IMPORTANT: Never auto-generate, auto-restore, or overwrite any staff user accounts on startup.
     this.state.users = (this.state.users || []).filter(
       u => !this.isUserDeleted(u.id) && !this.isUserDeleted(u.username)
     );
@@ -457,17 +535,17 @@ export class ServerStore {
     // Production initialization: sample operational data seeding permanently disabled
 
     // Ensure baseline verified backup exists and is synchronized with disk storage
-    if (!fs.existsSync(BACKUPS_DIR)) {
-      fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+    if (!fs.existsSync(this.backupsDirPath)) {
+      fs.mkdirSync(this.backupsDirPath, { recursive: true });
     }
 
     // Filter out stale in-memory backup records that no longer exist on disk
-    this.state.backups = (this.state.backups || []).filter(b => fs.existsSync(path.join(BACKUPS_DIR, b.filename)));
+    this.state.backups = (this.state.backups || []).filter(b => fs.existsSync(path.join(this.backupsDirPath, b.filename)));
 
-    const existingBackupFiles = fs.readdirSync(BACKUPS_DIR).filter(f => f.startsWith('turihamwe_backup_') && f.endsWith('.json'));
+    const existingBackupFiles = fs.readdirSync(this.backupsDirPath).filter(f => f.startsWith('turihamwe_backup_') && f.endsWith('.json'));
     if (existingBackupFiles.length > 0) {
       for (const file of existingBackupFiles) {
-        const fullPath = path.join(BACKUPS_DIR, file);
+        const fullPath = path.join(this.backupsDirPath, file);
         const content = fs.readFileSync(fullPath, 'utf8');
         const checksum = crypto.createHash('sha256').update(content).digest('hex');
         const sizeBytes = Buffer.byteLength(content, 'utf8');
@@ -484,14 +562,14 @@ export class ServerStore {
             createdAt: new Date().toISOString(),
             sizeBytes,
             checksum,
-            createdByUserId: 'usr-it-ivan',
-            createdByUsername: 'ivan',
-            createdByUserFullName: 'Ivan (IT Officer)',
+            createdByUserId: 'system',
+            createdByUsername: 'SYSTEM',
+            createdByUserFullName: 'System Baseline Archiver',
             type: 'MANUAL',
             status: 'VERIFIED',
             verifiedAt: new Date().toISOString(),
-            verifiedByUserId: 'usr-it-ivan',
-            verifiedByUsername: 'ivan',
+            verifiedByUserId: 'system',
+            verifiedByUsername: 'SYSTEM',
             verificationDetails: 'Cryptographic SHA-256 integrity match.',
             notes: 'Initial institutional verified baseline backup archive',
             recordCounts: {
@@ -506,7 +584,7 @@ export class ServerStore {
           });
         }
       }
-    } else {
+    } else if (this.state.backups.length === 0) {
       this.createInitialBaselineBackup();
     }
 
@@ -525,33 +603,24 @@ export class ServerStore {
       this.state.smsTemplates = this.state.smsTemplates.filter(t => !discontinuedCodes.includes(t.code));
     }
 
+    this.dbConnectionError = null;
     this.save();
     this.initialized = true;
-
-    // Ensure reference data/admin exists only if store has completely no users and not deployment-ready
-    try {
-      if (this.state.users.length === 0 && this.state.systemSettings['deployment.ready'] !== 'true') {
-        const { SeedService } = await import('../services/seedService');
-        await SeedService.seedInitialData();
-      }
-    } catch (err) {
-      console.error('Error invoking SeedService during store initialization:', err);
-    }
   }
 
   private seedDefaultDataIfEmpty(): void {
-    // Permanently disabled in production to guarantee that empty operational tables remain empty.
+    // Permanently disabled: operational user and member records are never auto-generated.
     return;
   }
 
   public save(): boolean {
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+      if (!fs.existsSync(this.dataDirPath)) {
+        fs.mkdirSync(this.dataDirPath, { recursive: true });
       }
-      const tmpFile = `${DATA_FILE}.tmp.${Date.now()}`;
+      const tmpFile = `${this.dataFilePath}.tmp.${Date.now()}`;
       fs.writeFileSync(tmpFile, JSON.stringify(this.state, null, 2), 'utf-8');
-      fs.renameSync(tmpFile, DATA_FILE);
+      fs.renameSync(tmpFile, this.dataFilePath);
       return true;
     } catch (err) {
       console.error('Error persisting database state to disk:', err);
@@ -562,6 +631,10 @@ export class ServerStore {
   public isUserDeleted(identifier: string): boolean {
     if (!identifier) return false;
     const clean = identifier.trim().toLowerCase();
+    // Root IT Administrator account (ivan) cannot be tombstoned
+    if (PROTECTED_ROOT_ADMIN_USERNAMES.includes(clean) || PROTECTED_ROOT_ADMIN_USER_IDS.includes(identifier)) {
+      return false;
+    }
     const inUsernames = this.state.deletedUserUsernames?.some(u => u.toLowerCase() === clean);
     const inIds = this.state.deletedUserIds?.includes(identifier);
     return Boolean(inUsernames || inIds);
@@ -1046,28 +1119,106 @@ export class ServerStore {
     return res;
   }
 
-  public addBeneficiary(b: Beneficiary): void {
-    this.state.beneficiaries.push(b);
-    const plan = this.state.plans.find(p => p.id === b.planId);
+  public getBeneficiaryById(id: string): Beneficiary | undefined {
+    return this.state.beneficiaries.find(b => b.id === id);
+  }
+
+  public getBeneficiariesByAccount(saccoAccountNumber: string): Beneficiary[] {
+    return this.getBeneficiaries(undefined, saccoAccountNumber);
+  }
+
+  public findDuplicateBiologicalParents(
+    name: string,
+    dateOfBirth: string,
+    currentAccountNumber: string,
+    nationalIdNumber?: string
+  ): { existingParent: Beneficiary; siblingMember?: SaccoMember; otherAccountNumber: string; otherMemberName: string; parentName: string }[] {
+    const trimmedName = (name || '').trim().toLowerCase();
+    const cleanNin = (nationalIdNumber || '').trim().toUpperCase();
+    const cleanDob = (dateOfBirth || '').trim();
+    const cleanAcc = (currentAccountNumber || '').trim().toUpperCase();
+
+    const matches: { existingParent: Beneficiary; siblingMember?: SaccoMember; otherAccountNumber: string; otherMemberName: string; parentName: string }[] = [];
+
+    for (const b of this.state.beneficiaries) {
+      if (b.saccoAccountNumber.toUpperCase() === cleanAcc) continue;
+      const bRel = (b.relationship || '').toUpperCase();
+      if (!bRel.includes('PARENT')) continue;
+
+      const nameMatch = b.fullName.trim().toLowerCase() === trimmedName;
+      const dobMatch = Boolean(cleanDob && b.dateOfBirth && b.dateOfBirth.trim() === cleanDob);
+      const ninMatch = Boolean(cleanNin && b.nationalIdNumber && b.nationalIdNumber.trim().toUpperCase() === cleanNin);
+
+      if (ninMatch || (nameMatch && dobMatch)) {
+        const sibling = this.getMemberByAccountNumber(b.saccoAccountNumber);
+        matches.push({
+          existingParent: b,
+          siblingMember: sibling,
+          otherAccountNumber: b.saccoAccountNumber,
+          otherMemberName: sibling?.fullName || b.saccoAccountNumber,
+          parentName: b.fullName,
+        });
+      }
+    }
+
+    return matches;
+  }
+
+  public addBeneficiary(b: Partial<Beneficiary> & { saccoAccountNumber: string; fullName: string; relationship: string }): Beneficiary {
+    const fullBen: Beneficiary = {
+      id: b.id || `ben-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      planId: b.planId || '',
+      saccoAccountNumber: b.saccoAccountNumber,
+      fullName: b.fullName,
+      relationship: b.relationship,
+      dateOfBirth: b.dateOfBirth,
+      nationalIdNumber: b.nationalIdNumber,
+      contactPhone: b.contactPhone,
+      percentageAllocation: b.percentageAllocation ?? 100,
+      status: b.status || (b.isDeceased ? 'DECEASED' : 'ALIVE'),
+      isActive: b.status === 'DECEASED' || b.isDeceased ? false : (b.isActive !== undefined ? b.isActive : true),
+      isDeceased: b.status === 'DECEASED' || b.isDeceased ? true : false,
+      deceasedDate: b.deceasedDate,
+      deceasedReason: b.deceasedReason,
+      createdAt: b.createdAt || new Date().toISOString(),
+      updatedAt: b.updatedAt || new Date().toISOString(),
+    };
+
+    this.state.beneficiaries.push(fullBen);
+    const plan = this.state.plans.find(p => (fullBen.planId && p.id === fullBen.planId) || p.saccoAccountNumber === fullBen.saccoAccountNumber);
     if (plan) {
-      plan.beneficiaryCount = this.state.beneficiaries.filter(x => x.planId === b.planId && x.isActive).length;
+      plan.beneficiaryCount = this.state.beneficiaries.filter(x => (x.planId === plan.id || x.saccoAccountNumber === plan.saccoAccountNumber) && x.isActive).length;
+      plan.totalBeneficiariesCount = this.state.beneficiaries.filter(x => x.planId === plan.id || x.saccoAccountNumber === plan.saccoAccountNumber).length;
       plan.updatedAt = new Date().toISOString();
     }
     this.save();
+    return fullBen;
   }
 
   public updateBeneficiary(id: string, updates: Partial<Beneficiary>): Beneficiary | undefined {
     const idx = this.state.beneficiaries.findIndex(b => b.id === id);
     if (idx === -1) return undefined;
+
+    if (updates.status !== undefined) {
+      updates.isActive = updates.status === 'ALIVE';
+      updates.isDeceased = updates.status === 'DECEASED';
+      if (updates.status === 'DECEASED' && !updates.deceasedDate) {
+        updates.deceasedDate = new Date().toISOString();
+      }
+    } else if (updates.isDeceased !== undefined) {
+      updates.status = updates.isDeceased ? 'DECEASED' : 'ALIVE';
+      updates.isActive = !updates.isDeceased;
+    }
+
     this.state.beneficiaries[idx] = {
       ...this.state.beneficiaries[idx],
       ...updates,
       updatedAt: new Date().toISOString(),
     };
     const b = this.state.beneficiaries[idx];
-    const plan = this.state.plans.find(p => p.id === b.planId);
+    const plan = this.state.plans.find(p => p.id === b.planId || p.saccoAccountNumber === b.saccoAccountNumber);
     if (plan) {
-      plan.beneficiaryCount = this.state.beneficiaries.filter(x => x.planId === b.planId && x.isActive).length;
+      plan.beneficiaryCount = this.state.beneficiaries.filter(x => (x.planId === plan.id || x.saccoAccountNumber === plan.saccoAccountNumber) && x.isActive).length;
       plan.updatedAt = new Date().toISOString();
     }
     this.save();
@@ -1077,10 +1228,15 @@ export class ServerStore {
   public addBeneficiaries(beneficiaries: Beneficiary[]): void {
     if (!beneficiaries || beneficiaries.length === 0) return;
     for (const b of beneficiaries) {
+      if (b.status === undefined) {
+        b.status = b.isDeceased ? 'DECEASED' : 'ALIVE';
+      }
+      b.isActive = b.status === 'ALIVE';
+      b.isDeceased = b.status === 'DECEASED';
       this.state.beneficiaries.push(b);
-      const plan = this.state.plans.find(p => p.id === b.planId);
+      const plan = this.state.plans.find(p => p.id === b.planId || p.saccoAccountNumber === b.saccoAccountNumber);
       if (plan) {
-        plan.beneficiaryCount = this.state.beneficiaries.filter(x => x.planId === b.planId && x.isActive).length;
+        plan.beneficiaryCount = this.state.beneficiaries.filter(x => (x.planId === plan.id || x.saccoAccountNumber === plan.saccoAccountNumber) && x.isActive).length;
         plan.updatedAt = new Date().toISOString();
       }
     }
@@ -1092,10 +1248,12 @@ export class ServerStore {
     if (idx === -1) return false;
     const b = this.state.beneficiaries[idx];
     b.isActive = false;
+    b.status = 'DECEASED';
+    b.isDeceased = true;
     b.updatedAt = new Date().toISOString();
-    const plan = this.state.plans.find(p => p.id === b.planId);
+    const plan = this.state.plans.find(p => p.id === b.planId || p.saccoAccountNumber === b.saccoAccountNumber);
     if (plan) {
-      plan.beneficiaryCount = this.state.beneficiaries.filter(x => x.planId === b.planId && x.isActive).length;
+      plan.beneficiaryCount = this.state.beneficiaries.filter(x => (x.planId === plan.id || x.saccoAccountNumber === plan.saccoAccountNumber) && x.isActive).length;
       plan.updatedAt = new Date().toISOString();
     }
     this.save();
@@ -1493,6 +1651,9 @@ export class ServerStore {
         const ben = this.state.beneficiaries.find(b => b.id === claim.beneficiaryId);
         if (ben) {
           ben.isActive = false;
+          ben.status = 'DECEASED';
+          ben.isDeceased = true;
+          ben.deceasedDate = new Date().toISOString();
           ben.updatedAt = new Date().toISOString();
         }
       }
@@ -2101,9 +2262,10 @@ export class ServerStore {
     const ugandaDate = getUgandaDateString(new Date());
     const timeStr = `${String(parts.hour).padStart(2, '0')}${String(parts.minute).padStart(2, '0')}${String(parts.second).padStart(2, '0')}`;
     const cleanTs = `${ugandaDate.replace(/-/g, '')}_${timeStr}`;
-    const backupId = `BKP-${cleanTs}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    const filename = `NYAMUYANJA_TURIHAMWE_BACKUP_${ugandaDate}_${timeStr}.bak`;
-    const filePath = path.join(BACKUPS_DIR, filename);
+    const uniqueId = crypto.randomBytes(3).toString('hex').toUpperCase();
+    const backupId = `BKP-${cleanTs}-${uniqueId}`;
+    const filename = `NYAMUYANJA_TURIHAMWE_BACKUP_${ugandaDate}_${timeStr}_${uniqueId}.bak`;
+    const filePath = path.join(this.backupsDirPath, filename);
 
     const recordCounts = {
       members: this.state.members.length,
@@ -2286,7 +2448,7 @@ export class ServerStore {
       };
     }
 
-    const filePath = path.join(BACKUPS_DIR, target.filename);
+    const filePath = path.join(this.backupsDirPath, target.filename);
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);
@@ -2318,7 +2480,7 @@ export class ServerStore {
       };
     }
 
-    const filePath = path.join(BACKUPS_DIR, backup.filename);
+    const filePath = path.join(this.backupsDirPath, backup.filename);
     if (!fs.existsSync(filePath)) {
       backup.status = 'FAILED';
       backup.verificationDetails = 'Backup storage archive file missing from filesystem.';
@@ -2407,7 +2569,7 @@ export class ServerStore {
       return { success: false, message: 'Target backup record not found.' };
     }
 
-    const filePath = path.join(BACKUPS_DIR, backup.filename);
+    const filePath = path.join(this.backupsDirPath, backup.filename);
     if (!fs.existsSync(filePath)) {
       return { success: false, message: 'Archive file is missing from backup storage.' };
     }
@@ -2500,7 +2662,7 @@ export class ServerStore {
   public getBackupFile(backupId: string): { filename: string; filePath: string; checksum: string; sizeBytes: number } | null {
     const backup = this.state.backups.find(b => b.id === backupId);
     if (!backup) return null;
-    const filePath = path.join(BACKUPS_DIR, backup.filename);
+    const filePath = path.join(this.backupsDirPath, backup.filename);
     if (!fs.existsSync(filePath)) return null;
     return {
       filename: backup.filename,
@@ -2790,6 +2952,13 @@ export class ServerStore {
           smsQueue: this.state.smsQueue.length,
         },
         lastWriteAt: this.state.auditLogs[0]?.timestamp || now,
+        databasePath: this.dataFilePath,
+        databaseDirectory: this.dataDirPath,
+        databaseSizeBytes: fs.existsSync(this.dataFilePath) ? fs.statSync(this.dataFilePath).size : 0,
+        databaseSha256: fs.existsSync(this.dataFilePath) ? crypto.createHash('sha256').update(fs.readFileSync(this.dataFilePath)).digest('hex') : '',
+        isExternalStorage: !this.dataDirPath.startsWith(process.cwd()),
+        isPersistent: true,
+        lastBackupSha256: latestVerifiedBackup?.checksum || latestBackup?.checksum || '',
       },
       localSQLite: {
         status: pendingSyncCount > 0 ? 'PENDING_TRANSACTIONS' : 'SYNCHRONIZED',
@@ -2878,16 +3047,32 @@ export class ServerStore {
     clearedTestUsers: number;
     clearedTestSms: number;
   } {
+    // 0. Production Data Protection Guard
+    const isProductionMode = process.env.NODE_ENV === 'production' || this.state.systemSettings['deployment.ready'] === 'true';
+    const isExplicitOverride = process.env.ALLOW_PROD_DATA_PURGE === 'true' && process.env.CONFIRM_PURGE_TOKEN === 'CONFIRM_PURGE_NYAMUYANJA_SACCO_PROD_SAFETY_OVERRIDE';
+    const isIsolatedTest = process.env.TUR_TEST_ENV === 'true';
+
+    if (isProductionMode && !isExplicitOverride && !isIsolatedTest) {
+      throw new Error('CRITICAL PRODUCTION SAFETY HALT: Operational data purge is strictly prohibited in production mode. Live institutional member records, subscriptions, financial transactions, and staff accounts are permanently protected.');
+    }
+
     // 1. Strictly verify that the genuine ivan account exists before proceeding
     const ivanUser = this.state.users.find(u => u.username.toLowerCase() === 'ivan');
     if (!ivanUser) {
       throw new Error('CRITICAL SAFETY HALT: Genuine ivan account not found in database. Aborting operational data purge.');
     }
 
-    // 2. Identify all other accounts to remove (sample, demo, and test accounts)
-    const removedUsers = this.state.users.filter(u => u.username.toLowerCase() !== 'ivan');
-    this.state.deletedUserIds = this.state.deletedUserIds || [];
-    this.state.deletedUserUsernames = this.state.deletedUserUsernames || [];
+    // 2. Identify only disposable test accounts to remove (preserve genuine root IT admin 'ivan')
+    const removedUsers = this.state.users.filter(
+      u => !PROTECTED_ROOT_ADMIN_USERNAMES.includes(u.username.toLowerCase()) &&
+           !PROTECTED_ROOT_ADMIN_USER_IDS.includes(u.id)
+    );
+    this.state.deletedUserIds = (this.state.deletedUserIds || []).filter(
+      id => !PROTECTED_ROOT_ADMIN_USER_IDS.includes(id)
+    );
+    this.state.deletedUserUsernames = (this.state.deletedUserUsernames || []).filter(
+      u => !PROTECTED_ROOT_ADMIN_USERNAMES.includes(u.toLowerCase())
+    );
 
     for (const rem of removedUsers) {
       if (!this.state.deletedUserIds.includes(rem.id)) {
@@ -2898,8 +3083,11 @@ export class ServerStore {
       }
     }
 
-    // Preserve exclusively the genuine ivan account with all permissions and multi-branch access
-    this.state.users = [ivanUser];
+    // Preserve root IT admin 'ivan'
+    this.state.users = this.state.users.filter(
+      u => PROTECTED_ROOT_ADMIN_USERNAMES.includes(u.username.toLowerCase()) ||
+           PROTECTED_ROOT_ADMIN_USER_IDS.includes(u.id)
+    );
     const clearedTestUsers = removedUsers.length;
 
     // Purge ALL demo/test SMS queue entries completely
@@ -2981,12 +3169,22 @@ export class ServerStore {
     return counts;
   }
 
+  public createPreMigrationBackup(reason: string = 'Pre-update/migration safety snapshot'): BackupRecord {
+    return this.createBackup({
+      userId: 'system',
+      username: 'SYSTEM',
+      userFullName: 'Pre-Migration Safety Archiver',
+      type: 'MANUAL',
+      notes: reason,
+    }).backup;
+  }
+
   private createInitialBaselineBackup(): void {
     try {
       this.createBackup({
-        userId: 'usr-it-01',
-        username: 'itadm',
-        userFullName: 'IT Systems Officer',
+        userId: 'system',
+        username: 'SYSTEM',
+        userFullName: 'System Baseline Archiver',
         type: 'MANUAL',
         notes: 'Initial institutional verified baseline backup archive',
       });

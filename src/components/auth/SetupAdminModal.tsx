@@ -127,7 +127,7 @@ export const SetupAdminModal: React.FC<SetupAdminModalProps> = ({ isOpen, onClos
                 maxLength={10}
                 value={username}
                 onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
-                placeholder="e.g. itadm"
+                placeholder="e.g. admin01"
                 required
                 className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 font-mono uppercase bg-white text-slate-900"
               />

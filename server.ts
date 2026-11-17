@@ -27,8 +27,8 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Port 3000 is strictly required internally; Nginx proxies public port 8080 to localhost:3000
-const PORT = 3000;
+// Port 3000 is required internally (config.app.port maps container PORT=8080 to 3000 while allowing explicit test ports)
+const PORT = config.app.port;
 const isProd = config.app.isProduction;
 
 async function bootstrap() {
@@ -50,10 +50,16 @@ async function bootstrap() {
   app.use((req, res, next) => {
     const origin = req.headers.origin;
     const allowed = config.app.corsAllowedOrigins;
+    const requestHost = req.get('host');
+    const isSameHostOrigin = Boolean(
+      origin &&
+        requestHost &&
+        (origin === `https://${requestHost}` || origin === `http://${requestHost}`)
+    );
 
     if (config.app.isDevelopment || !origin) {
       if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
-    } else if (allowed.includes(origin) || allowed.includes('*')) {
+    } else if (allowed.includes(origin) || allowed.includes('*') || isSameHostOrigin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
     }
 
@@ -73,9 +79,9 @@ async function bootstrap() {
     res.status(403).json({ error: 'Access forbidden: internal data repositories are protected from public web access.' });
   });
 
-  // Initialize persistence and database seed
+  // Initialize persistence and validate non-operational reference configuration
   await serverStore.initialize();
-  await SeedService.seedInitialData();
+  await SeedService.ensureReferenceConfiguration();
 
   // Start background Pandora SMS Queue Worker
   smsQueueWorker.start();
@@ -137,7 +143,7 @@ async function bootstrap() {
     const smsMessages = serverStore.getSmsMessages();
 
     res.json({
-      status: 'ONLINE',
+      status: serverStore.isDatabaseHealthy() ? 'ONLINE' : 'DEGRADED',
       system: 'Turihamwe Management System',
       organization: 'Nyamuyanja SACCO Ltd, Uganda',
       version: '1.0.0-phase9',
@@ -146,8 +152,8 @@ async function bootstrap() {
       uptimeSeconds: Math.floor(process.uptime()),
       components: {
         database: {
-          status: 'HEALTHY',
-          mode: config.database.databaseUrl ? 'PostgreSQL_Central_Storage' : 'Local_Transactional_Journal',
+          status: serverStore.isDatabaseHealthy() ? 'HEALTHY' : 'ERROR',
+          mode: 'Local_Transactional_Journal',
           branchesCount: branches.length,
           usersCount: users.length,
           membersCount: members.length,

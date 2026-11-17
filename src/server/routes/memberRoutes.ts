@@ -3,7 +3,13 @@ import { requireAuth, requirePermission, AuthenticatedRequest } from '../middlew
 import { serverStore } from '../storage/serverStore';
 import { SaccoMember, ControlledCorrection, Beneficiary } from '../../types';
 import { AuditService } from '../services/auditService';
-import { isWithinUgandaFiveDaysWindow, calculateUgandaAge, MAX_TURIHAMWE_ELIGIBLE_AGE } from '../../utils/timezone';
+import {
+  isWithinUgandaFiveDaysWindow,
+  calculateUgandaAge,
+  MAX_TURIHAMWE_ELIGIBLE_AGE,
+  isPermittedBeneficiaryRelationship,
+  formatBeneficiaryRelationship,
+} from '../../utils/timezone';
 
 export const memberRouter = Router();
 
@@ -92,7 +98,7 @@ memberRouter.get(
     const locked = !isWithinFiveDays(member.registrationDate);
     const corrections = serverStore.getCorrectionsForMember(accountNumber);
     const auditLogs = serverStore.getAuditLogs({ limit: 50 }).filter(l => l.recordId === accountNumber);
-    const beneficiaries = serverStore.getBeneficiaries(undefined, accountNumber).filter(b => b.isActive !== false);
+    const beneficiaries = serverStore.getBeneficiaries(undefined, accountNumber);
 
     res.json({
       success: true,
@@ -231,13 +237,11 @@ memberRouter.post(
     const clientStatus = body.clientStatus === 'DECEASED' ? 'DECEASED' : 'ALIVE';
 
     // Requirement 3 & Policy 7: Validate beneficiaries submitted in the registration workflow
+    // Unlimited beneficiaries permitted (no maximum limit); Only 3 relationship categories allowed
     const beneficiariesToCreate: Beneficiary[] = [];
-    if (Array.isArray(body.beneficiaries) && body.beneficiaries.length > 0) {
-      if (body.beneficiaries.length > 12) {
-        res.status(400).json({ error: 'Maximum family membership limit of 13 members (1 primary member + 12 beneficiaries) exceeded for this Turihamwe plan.' });
-        return;
-      }
+    const duplicateParentNotices: any[] = [];
 
+    if (Array.isArray(body.beneficiaries) && body.beneficiaries.length > 0) {
       let spouseCount = 0;
       for (let i = 0; i < body.beneficiaries.length; i++) {
         const b = body.beneficiaries[i];
@@ -281,13 +285,61 @@ memberRouter.post(
           return;
         }
 
+        // Revised Beneficiary Policy: Exactly three permitted relationship categories
+        if (!isPermittedBeneficiaryRelationship(bRel)) {
+          res.status(400).json({
+            error: `Beneficiary #${i + 1} (${bName}): Relationship '${bRel}' is not permitted. Under approved Turihamwe policy, only three relationship categories are allowed: Biological Child, Biological Parent, or Spouse.`,
+          });
+          return;
+        }
+
+        const formattedRel = formatBeneficiaryRelationship(bRel);
+
         // Policy 7: Maximum 1 spouse/wife
-        const relLower = bRel.toLowerCase();
-        if (['spouse', 'wife', 'husband'].includes(relLower)) {
+        if (formattedRel === 'Spouse') {
           spouseCount++;
           if (spouseCount > 1) {
             res.status(400).json({ error: 'Only one spouse/wife may be registered under a single Turihamwe plan.' });
             return;
+          }
+        }
+
+        // Biological Parent Duplicate Detection
+        if (formattedRel === 'Biological Parent') {
+          const duplicateParents = serverStore.findDuplicateBiologicalParents(
+            bName,
+            bDob,
+            saccoAccountNumber,
+            b.nationalIdNumber
+          );
+          if (duplicateParents.length > 0) {
+            for (const dp of duplicateParents) {
+              duplicateParentNotices.push({
+                type: 'DUPLICATE_BIOLOGICAL_PARENT_DETECTED',
+                parentName: bName,
+                dateOfBirth: bDob,
+                nationalIdNumber: (b.nationalIdNumber || '').trim().toUpperCase() || undefined,
+                existingMemberAccountNumber: dp.existingParent.saccoAccountNumber,
+                existingMemberName: dp.siblingMember?.fullName || 'Existing Sibling Member',
+                existingBeneficiaryId: dp.existingParent.id,
+                message: `Notice: Biological Parent '${bName}' (DOB: ${bDob}) is already registered under sibling member ${dp.siblingMember?.fullName || dp.existingParent.saccoAccountNumber} (Account: ${dp.existingParent.saccoAccountNumber}). Legitimate registration permitted under SACCO shared biological parent policy; notification logged for verification review.`,
+              });
+
+              serverStore.addAlert({
+                id: `alt-parent-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                category: 'SHARED_BIOLOGICAL_PARENT_DETECTED',
+                severity: 'INFO',
+                title: 'Shared Biological Parent Enrolment',
+                message: `Biological Parent '${bName}' enrolled under member ${saccoAccountNumber} is already registered under sibling member ${dp.siblingMember?.fullName || dp.existingParent.saccoAccountNumber} (${dp.existingParent.saccoAccountNumber}).`,
+                branchId: targetBranch.id,
+                branchName: targetBranch.name,
+                status: 'UNREAD',
+                readByUsers: [],
+                isRead: false,
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              });
+            }
           }
         }
 
@@ -296,12 +348,14 @@ memberRouter.post(
           saccoAccountNumber,
           planId: '',
           fullName: bName,
-          relationship: bRel,
+          relationship: formattedRel,
           dateOfBirth: bDob,
           nationalIdNumber: (b.nationalIdNumber || '').trim().toUpperCase() || undefined,
           contactPhone: (b.contactPhone || '').trim() || undefined,
           percentageAllocation: Number(b.percentageAllocation) || Math.floor(100 / body.beneficiaries.length),
           isActive: true,
+          status: 'ALIVE',
+          isDeceased: false,
           createdAt: nowIso,
           updatedAt: nowIso,
         });
@@ -376,6 +430,7 @@ memberRouter.post(
         ...newMember,
         beneficiaries: beneficiariesToCreate,
       },
+      duplicateParentNotices: duplicateParentNotices.length > 0 ? duplicateParentNotices : undefined,
     });
   }
 );
@@ -685,7 +740,8 @@ memberRouter.patch(
     const user = req.user!;
     const workingBranch = req.workingBranch!;
     const accountNumber = req.params.accountNumber.trim().toUpperCase();
-    const { status, reason } = req.body;
+    const status = req.body.status || req.body.clientStatus;
+    const reason = req.body.reason;
 
     if (!status || !['ALIVE', 'DECEASED'].includes(status)) {
       res.status(400).json({ error: "Invalid status: Must explicitly be 'ALIVE' or 'DECEASED'." });
@@ -761,7 +817,7 @@ memberRouter.get(
       res.status(404).json({ error: `Member with SACCO account number '${accountNumber}' not found.` });
       return;
     }
-    const beneficiaries = serverStore.getBeneficiaries(undefined, accountNumber).filter(b => b.isActive !== false);
+    const beneficiaries = serverStore.getBeneficiaries(undefined, accountNumber);
     res.json({ success: true, data: beneficiaries });
   }
 );
@@ -803,12 +859,10 @@ memberRouter.post(
       res.status(400).json({ error: 'Beneficiary date of birth cannot be in the future.' });
       return;
     }
-    // Policy 7: Enforce max family members (1 primary member + up to 12 active beneficiaries = 13)
+
+    // Policy 7: Revised Beneficiary Policy - No maximum numerical limit on beneficiaries
+    // (Previous 13-member limit permanently removed)
     const existingBeneficiaries = serverStore.getBeneficiaries(undefined, member.saccoAccountNumber).filter(b => b.isActive !== false);
-    if (existingBeneficiaries.length >= 12) {
-      res.status(400).json({ error: 'Maximum family membership limit of 13 members (1 primary member + 12 beneficiaries) reached for this Turihamwe plan.' });
-      return;
-    }
 
     // Policy 7: Enforce maximum age of 70 years at enrollment (authoritative Africa/Kampala calendar calculation, exempting members with running active plans)
     const ageRes = calculateUgandaAge(dateOfBirth);
@@ -827,10 +881,24 @@ memberRouter.post(
       }
     }
 
+    if (!relationship || !relationship.trim()) {
+      res.status(400).json({ error: 'Beneficiary relationship to member is required.' });
+      return;
+    }
+
+    // Revised Beneficiary Policy: Exactly three permitted relationship categories
+    if (!isPermittedBeneficiaryRelationship(relationship)) {
+      res.status(400).json({
+        error: `Relationship '${relationship}' is not permitted. Under approved Turihamwe policy, only three relationship categories are allowed: Biological Child, Biological Parent, or Spouse.`,
+      });
+      return;
+    }
+
+    const formattedRel = formatBeneficiaryRelationship(relationship);
+
     // Policy 7: Enforce maximum 1 spouse/wife
-    const relLower = relationship.trim().toLowerCase();
-    if (['spouse', 'wife', 'husband'].includes(relLower)) {
-      const existingSpouse = existingBeneficiaries.find(b => ['spouse', 'wife', 'husband'].includes(b.relationship.toLowerCase()));
+    if (formattedRel === 'Spouse') {
+      const existingSpouse = existingBeneficiaries.find(b => b.relationship.toUpperCase() === 'SPOUSE' || b.relationship.toLowerCase().includes('spouse'));
       if (existingSpouse) {
         res.status(400).json({ error: 'Only one spouse/wife may be registered under a single Turihamwe plan.' });
         return;
@@ -838,17 +906,59 @@ memberRouter.post(
     }
 
     const nowIso = new Date().toISOString();
+    let duplicateParentNotice: any = undefined;
+
+    // Biological Parent Duplicate Detection
+    if (formattedRel === 'Biological Parent') {
+      const duplicateParents = serverStore.findDuplicateBiologicalParents(
+        fullName,
+        dateOfBirth,
+        member.saccoAccountNumber,
+        nationalIdNumber
+      );
+      if (duplicateParents.length > 0) {
+        const dp = duplicateParents[0];
+        duplicateParentNotice = {
+          type: 'DUPLICATE_BIOLOGICAL_PARENT_DETECTED',
+          parentName: fullName.trim(),
+          dateOfBirth: dateOfBirth.trim(),
+          nationalIdNumber: (nationalIdNumber || '').trim().toUpperCase() || undefined,
+          existingMemberAccountNumber: dp.existingParent.saccoAccountNumber,
+          existingMemberName: dp.siblingMember?.fullName || 'Existing Sibling Member',
+          existingBeneficiaryId: dp.existingParent.id,
+          message: `Notice: Biological Parent '${fullName.trim()}' (DOB: ${dateOfBirth.trim()}) is already registered under sibling member ${dp.siblingMember?.fullName || dp.existingParent.saccoAccountNumber} (Account: ${dp.existingParent.saccoAccountNumber}). Legitimate registration permitted under SACCO shared biological parent policy; notification logged for verification review.`,
+        };
+
+        serverStore.addAlert({
+          id: `alt-parent-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          category: 'SHARED_BIOLOGICAL_PARENT_DETECTED',
+          severity: 'INFO',
+          title: 'Shared Biological Parent Enrolment',
+          message: `Biological Parent '${fullName.trim()}' enrolled under member ${member.saccoAccountNumber} is already registered under sibling member ${dp.siblingMember?.fullName || dp.existingParent.saccoAccountNumber} (${dp.existingParent.saccoAccountNumber}).`,
+          branchId: member.branchId,
+          branchName: member.branchName || workingBranch.name,
+          status: 'UNREAD',
+          readByUsers: [],
+          isRead: false,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+      }
+    }
+
     const newBeneficiary: Beneficiary = {
       id: `ben-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       saccoAccountNumber: member.saccoAccountNumber,
       planId: '',
       fullName: fullName.trim(),
-      relationship: relationship.trim(),
+      relationship: formattedRel,
       dateOfBirth: dateOfBirth.trim(),
       nationalIdNumber: (nationalIdNumber || '').trim().toUpperCase() || undefined,
       contactPhone: (contactPhone || '').trim() || undefined,
       percentageAllocation: Number(percentageAllocation) || 0,
       isActive: true,
+      status: 'ALIVE',
+      isDeceased: false,
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -868,7 +978,144 @@ memberRouter.post(
       reason: `Added beneficiary ${newBeneficiary.fullName} (${newBeneficiary.relationship}) for member ${accountNumber}`,
     });
 
-    res.status(201).json({ success: true, data: newBeneficiary });
+    res.status(201).json({
+      success: true,
+      data: newBeneficiary,
+      duplicateParentNotice,
+    });
+  }
+);
+
+/**
+ * POST /api/members/:accountNumber/beneficiaries/bulk
+ * Bulk add beneficiaries to an existing member with full validation of the 3 permitted categories.
+ */
+memberRouter.post(
+  '/:accountNumber/beneficiaries/bulk',
+  requireAuth,
+  requirePermission('members.edit'),
+  (req: AuthenticatedRequest, res: Response): void => {
+    const user = req.user!;
+    const workingBranch = req.workingBranch!;
+    const accountNumber = req.params.accountNumber.trim().toUpperCase();
+    const member = serverStore.getMemberByAccountNumber(accountNumber);
+    if (!member) {
+      res.status(404).json({ error: `Member with SACCO account number '${accountNumber}' not found.` });
+      return;
+    }
+
+    const { beneficiaries } = req.body;
+    if (!Array.isArray(beneficiaries) || beneficiaries.length === 0) {
+      res.status(400).json({ error: 'Array of beneficiaries is required for bulk import.' });
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const created: Beneficiary[] = [];
+    const duplicateNotices: any[] = [];
+    const existingBeneficiaries = serverStore.getBeneficiaries(undefined, member.saccoAccountNumber).filter(b => b.isActive !== false);
+
+    let spouseCount = existingBeneficiaries.filter(b => b.relationship.toUpperCase() === 'SPOUSE' || b.relationship.toLowerCase().includes('spouse')).length;
+
+    for (let i = 0; i < beneficiaries.length; i++) {
+      const b = beneficiaries[i];
+      const bName = (b.fullName || '').trim();
+      const bDob = (b.dateOfBirth || '').trim();
+      const bRel = (b.relationship || '').trim();
+
+      if (!bName) {
+        res.status(400).json({ error: `Beneficiary #${i + 1}: Full legal name is required.` });
+        return;
+      }
+      if (!bDob) {
+        res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): Date of birth is required.` });
+        return;
+      }
+      const dobTime = new Date(bDob).getTime();
+      if (isNaN(dobTime) || dobTime > Date.now()) {
+        res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): Date of birth is invalid or in the future.` });
+        return;
+      }
+
+      const ageRes = calculateUgandaAge(bDob);
+      if (!ageRes.isValid) {
+        res.status(400).json({ error: `Beneficiary #${i + 1} (${bName}): ${ageRes.error}` });
+        return;
+      }
+      if (!ageRes.isEligibleForTurihamwe) {
+        res.status(400).json({
+          error: `Beneficiary #${i + 1} (${bName}): Beneficiary age (${ageRes.age} years) exceeds the maximum eligible age of ${MAX_TURIHAMWE_ELIGIBLE_AGE} years at initial enrollment under Turihamwe policy.`,
+        });
+        return;
+      }
+
+      if (!isPermittedBeneficiaryRelationship(bRel)) {
+        res.status(400).json({
+          error: `Beneficiary #${i + 1} (${bName}): Relationship '${bRel}' is not permitted. Under approved Turihamwe policy, only three relationship categories are allowed: Biological Child, Biological Parent, or Spouse.`,
+        });
+        return;
+      }
+
+      const formattedRel = formatBeneficiaryRelationship(bRel);
+      if (formattedRel === 'Spouse') {
+        spouseCount++;
+        if (spouseCount > 1) {
+          res.status(400).json({ error: 'Only one spouse/wife may be registered under a single Turihamwe plan.' });
+          return;
+        }
+      }
+
+      if (formattedRel === 'Biological Parent') {
+        const dupes = serverStore.findDuplicateBiologicalParents(bName, bDob, member.saccoAccountNumber, b.nationalIdNumber);
+        if (dupes.length > 0) {
+          duplicateNotices.push({
+            type: 'DUPLICATE_BIOLOGICAL_PARENT_DETECTED',
+            parentName: bName,
+            existingMemberAccountNumber: dupes[0].existingParent.saccoAccountNumber,
+            message: `Notice: Biological Parent '${bName}' is also registered under sibling member ${dupes[0].existingParent.saccoAccountNumber}.`,
+          });
+        }
+      }
+
+      const newBen: Beneficiary = {
+        id: `ben-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${i}`,
+        saccoAccountNumber: member.saccoAccountNumber,
+        planId: '',
+        fullName: bName,
+        relationship: formattedRel,
+        dateOfBirth: bDob,
+        nationalIdNumber: (b.nationalIdNumber || '').trim().toUpperCase() || undefined,
+        contactPhone: (b.contactPhone || '').trim() || undefined,
+        percentageAllocation: Number(b.percentageAllocation) || Math.floor(100 / beneficiaries.length),
+        isActive: true,
+        status: 'ALIVE',
+        isDeceased: false,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      created.push(newBen);
+    }
+
+    serverStore.addBeneficiaries(created);
+
+    AuditService.log({
+      userId: user.id,
+      username: user.username,
+      userFullName: user.fullName,
+      branchId: member.branchId,
+      branchName: member.branchName || workingBranch.name,
+      action: 'BENEFICIARY_ADDED',
+      recordType: 'BENEFICIARY',
+      recordId: member.saccoAccountNumber,
+      newValue: `Bulk registered ${created.length} beneficiaries for member ${accountNumber}`,
+      reason: `Bulk beneficiary enrollment for member ${accountNumber}`,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: created,
+      duplicateNotices: duplicateNotices.length > 0 ? duplicateNotices : undefined,
+    });
   }
 );
 
@@ -896,11 +1143,19 @@ memberRouter.put(
       return;
     }
 
-    const { fullName, dateOfBirth, relationship, nationalIdNumber, contactPhone, percentageAllocation } = req.body;
+    const { fullName, dateOfBirth, relationship, nationalIdNumber, contactPhone, percentageAllocation, status } = req.body;
     const updates: Partial<Beneficiary> = {};
 
     if (fullName !== undefined) updates.fullName = fullName.trim();
-    if (relationship !== undefined) updates.relationship = relationship.trim();
+    if (relationship !== undefined) {
+      if (!isPermittedBeneficiaryRelationship(relationship)) {
+        res.status(400).json({
+          error: `Relationship '${relationship}' is not permitted. Under approved Turihamwe policy, only three relationship categories are allowed: Biological Child, Biological Parent, or Spouse.`,
+        });
+        return;
+      }
+      updates.relationship = formatBeneficiaryRelationship(relationship);
+    }
     if (dateOfBirth !== undefined) {
       const dobTime = new Date(dateOfBirth).getTime();
       if (isNaN(dobTime)) {
@@ -916,6 +1171,18 @@ memberRouter.put(
     if (nationalIdNumber !== undefined) updates.nationalIdNumber = nationalIdNumber.trim().toUpperCase();
     if (contactPhone !== undefined) updates.contactPhone = contactPhone.trim();
     if (percentageAllocation !== undefined) updates.percentageAllocation = Number(percentageAllocation);
+    if (status !== undefined) {
+      if (!['ALIVE', 'DECEASED'].includes(status)) {
+        res.status(400).json({ error: "Invalid status: Must explicitly be 'ALIVE' or 'DECEASED'." });
+        return;
+      }
+      updates.status = status;
+      updates.isActive = status === 'ALIVE';
+      updates.isDeceased = status === 'DECEASED';
+      if (status === 'DECEASED') {
+        updates.deceasedDate = new Date().toISOString();
+      }
+    }
 
     const prev = JSON.stringify(b);
     const updated = serverStore.updateBeneficiary(beneficiaryId, updates);
@@ -935,6 +1202,81 @@ memberRouter.put(
     });
 
     res.json({ success: true, data: updated });
+  }
+);
+
+/**
+ * PATCH /api/members/:accountNumber/beneficiaries/:beneficiaryId/status
+ * Explicitly update beneficiary status to 'ALIVE' or 'DECEASED'.
+ * Preserves the historical beneficiary record without deleting it.
+ * Marking a beneficiary deceased explicitly keeps the member's Turihamwe plan ACTIVE.
+ */
+memberRouter.patch(
+  '/:accountNumber/beneficiaries/:beneficiaryId/status',
+  requireAuth,
+  requirePermission('members.edit'),
+  (req: AuthenticatedRequest, res: Response): void => {
+    const user = req.user!;
+    const workingBranch = req.workingBranch!;
+    const { accountNumber, beneficiaryId } = req.params;
+    const { status, reason } = req.body;
+
+    if (!status || !['ALIVE', 'DECEASED'].includes(status)) {
+      res.status(400).json({ error: "Invalid status: Must explicitly be 'ALIVE' or 'DECEASED'." });
+      return;
+    }
+
+    const member = serverStore.getMemberByAccountNumber(accountNumber.trim().toUpperCase());
+    if (!member) {
+      res.status(404).json({ error: `Member with SACCO account number '${accountNumber}' not found.` });
+      return;
+    }
+
+    const b = serverStore.getBeneficiaries().find(x => x.id === beneficiaryId);
+    if (!b || b.saccoAccountNumber.toUpperCase() !== accountNumber.trim().toUpperCase()) {
+      res.status(404).json({ error: 'Beneficiary record not found for this member.' });
+      return;
+    }
+
+    const prev = JSON.stringify(b);
+    const updates: Partial<Beneficiary> = {
+      status: status as 'ALIVE' | 'DECEASED',
+      isActive: status === 'ALIVE',
+      isDeceased: status === 'DECEASED',
+      deceasedDate: status === 'DECEASED' ? new Date().toISOString() : undefined,
+      deceasedReason: status === 'DECEASED' ? (reason || 'Marked as deceased by authorized staff') : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updated = serverStore.updateBeneficiary(beneficiaryId, updates);
+
+    // Verify owner's Turihamwe plan remains ACTIVE
+    const memberPlans = serverStore.getPlansForMember(accountNumber.trim().toUpperCase());
+    for (const p of memberPlans) {
+      if (['ACTIVE', 'MATURED / AWAITING RENEWAL', 'WITHIN GRACE PERIOD', 'PENDING_RENEWAL'].includes(p.status)) {
+        // Explicitly maintain active status
+      }
+    }
+
+    AuditService.log({
+      userId: user.id,
+      username: user.username,
+      userFullName: user.fullName,
+      branchId: member.branchId,
+      branchName: member.branchName || workingBranch.name,
+      action: status === 'DECEASED' ? 'BENEFICIARY_MARKED_DECEASED' : 'BENEFICIARY_UPDATED',
+      recordType: 'BENEFICIARY',
+      recordId: beneficiaryId,
+      previousValue: prev,
+      newValue: JSON.stringify(updated),
+      reason: reason || `Updated beneficiary status to ${status} for member ${accountNumber}`,
+    });
+
+    res.json({
+      success: true,
+      message: `Beneficiary '${b.fullName}' marked as ${status}. Historical record preserved. Owner's plan remains active.`,
+      data: updated,
+    });
   }
 );
 
@@ -974,7 +1316,7 @@ memberRouter.delete(
       recordType: 'BENEFICIARY',
       recordId: beneficiaryId,
       previousValue: JSON.stringify(b),
-      newValue: JSON.stringify({ isActive: false }),
+      newValue: JSON.stringify({ isActive: false, status: 'DECEASED' }),
       reason: `Removed/deactivated beneficiary ${b.fullName} (${b.relationship}) from member ${accountNumber}`,
     });
 

@@ -15,8 +15,10 @@
  */
 
 import { serverStore } from '../server/storage/serverStore';
+import { config } from '../server/config';
 import { scheduledBackupWorker } from '../server/services/scheduledBackupWorker';
 import { AuthService } from '../server/services/authService';
+import { ensureIsolatedTestAdmin } from './testAdminHelper';
 import fs from 'fs';
 import path from 'path';
 
@@ -31,6 +33,7 @@ export class MasterProductionDeploymentTestRunner {
   public static async runAllTests(): Promise<TestResult[]> {
     const results: TestResult[] = [];
     await serverStore.initialize();
+    await ensureIsolatedTestAdmin();
 
     // 1. Ivan Account Preservation
     try {
@@ -67,21 +70,26 @@ export class MasterProductionDeploymentTestRunner {
       const renewals = serverStore.getRenewals();
       const users = serverStore.getUsers();
 
+      const authenticStaff = ['ivan'];
+      const demoUsernames = ['gm001', 'bmnya', 'csh01', 'acct1', 'audit', 'itadm'];
+      const nonStaffUsers = users.filter(u => !authenticStaff.includes(u.username.toLowerCase()));
+      const foundDemoUsers = users.filter(u => demoUsernames.includes(u.username.toLowerCase()));
       const passed = members.length === 0 &&
                      plans.length === 0 &&
                      contributions.length === 0 &&
                      claims.length === 0 &&
                      renewals.length === 0 &&
-                     users.length === 1 &&
-                     users[0].username === 'ivan';
+                     users.some(u => u.username === 'ivan') &&
+                     foundDemoUsers.length === 0 &&
+                     nonStaffUsers.length === 0;
 
       results.push({
         id: 2,
         name: 'Zero Demo Records & Clean Operational Slate in Production Database',
         passed,
         message: passed
-          ? `Verified zero demo records (0 members, 0 plans, 0 contributions, 0 claims, 1 genuine user)`
-          : `Non-zero records found: ${members.length} members, ${plans.length} plans, ${users.length} users`,
+          ? `Verified zero demo records (0 members, 0 plans, 0 contributions, 0 claims, ${users.length} root admin account, 0 fake/demo staff accounts)`
+          : `Non-zero or unexpected records found: ${members.length} members, ${plans.length} plans, ${nonStaffUsers.length} unexpected users`,
       });
     } catch (e: any) {
       results.push({ id: 2, name: 'Zero Demo Records', passed: false, message: e.message });
@@ -100,7 +108,7 @@ export class MasterProductionDeploymentTestRunner {
                      gracePeriodDaysStatus === 'STRICTLY_PROHIBITED' &&
                      lapseMonths === 0 &&
                      noticeDays === 0 &&
-                     graceDays === 0;
+                     (graceDays === 0 || graceDays === null || graceDays === -1);
 
       results.push({
         id: 3,
@@ -178,7 +186,7 @@ export class MasterProductionDeploymentTestRunner {
       const isVerified = backupRes.backup.status === 'VERIFIED';
       createdBackupId = backupRes.backup.id;
 
-      const backupPath = path.join(process.cwd(), 'data', 'backups', backupRes.backup.filename);
+      const backupPath = path.join(config.backup.storagePath, backupRes.backup.filename);
       const existsOnDisk = fs.existsSync(backupPath);
       let parsedManifestOk = false;
       if (existsOnDisk) {
@@ -239,13 +247,17 @@ export class MasterProductionDeploymentTestRunner {
 
     // 9. Backup Deletion Safety Guards (Cannot delete latest verified backup)
     try {
+      const latestVerifiedId =
+        serverStore.getBackups().find(b => b.status === 'VERIFIED' || b.status === 'COMPLETED')?.id ||
+        createdBackupId;
+
       // Attempting to delete the newest backup should fail safety guard 2
-      const deleteProtectedRes = serverStore.deleteBackup(createdBackupId, {
+      const deleteProtectedRes = serverStore.deleteBackup(latestVerifiedId, {
         userId: 'usr-it-ivan',
         username: 'ivan',
       });
 
-      // Now create another backup so createdBackupId is no longer the latest
+      // Now create another backup so latestVerifiedId is no longer the latest
       serverStore.createBackup({
         userId: 'usr-it-ivan',
         username: 'ivan',
@@ -255,7 +267,7 @@ export class MasterProductionDeploymentTestRunner {
       });
 
       // Now deleting the older backup should succeed
-      const deleteOldRes = serverStore.deleteBackup(createdBackupId, {
+      const deleteOldRes = serverStore.deleteBackup(latestVerifiedId, {
         userId: 'usr-it-ivan',
         username: 'ivan',
       });

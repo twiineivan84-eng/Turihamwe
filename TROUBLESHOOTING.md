@@ -26,9 +26,9 @@
 
 ---
 
-### Symptom: "SMS dispatch failed: Missing required environment variable: AT_API_KEY"
-- **Cause**: `SMS_ENVIRONMENT` was set to `PRODUCTION` without specifying `AT_API_KEY` or `AT_USERNAME`.
-- **Resolution**: Supply valid live credentials from the Africa's Talking Uganda portal, or set `SMS_ENVIRONMENT=SANDBOX` / `SMS_ENABLED=false` for local testing.
+### Symptom: "Pandora SMS submission is not configured"
+- **Cause**: `SMS_ENABLED` is `true` without specifying `PANDORA_SMS_PHONE_NUMBER` or `PANDORA_SMS_PASSWORD`.
+- **Resolution**: Supply valid live credentials from Pandora Networks (`PANDORA_SMS_PHONE_NUMBER` and `PANDORA_SMS_PASSWORD`), or set `SMS_ENABLED=false` for offline/local testing.
 
 ---
 

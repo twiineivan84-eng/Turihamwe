@@ -571,7 +571,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onAddN
                 >
                   <span className="flex items-center gap-2">
                     <MessageSquare className="w-3.5 h-3.5 text-blue-700" />
-                    SMS Notifications &amp; Africa&apos;s Talking
+                    SMS Notifications &amp; Pandora Networks
                   </span>
                   <div className="flex items-center gap-1.5">
                     {failedSmsCount > 0 && (

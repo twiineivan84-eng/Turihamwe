@@ -26,6 +26,7 @@ import bcrypt from 'bcryptjs';
 import { AuthService } from '../server/services/authService';
 import { serverStore } from '../server/storage/serverStore';
 import { AuditService } from '../server/services/auditService';
+import { ensureIsolatedTestAdmin } from './testAdminHelper';
 import { User, Role, PermissionCode, BackupRecord } from '../types';
 
 export interface TestResult {
@@ -43,6 +44,7 @@ export class Phase7TestRunner {
 
     // Initialize in-memory / persistent server store
     await serverStore.initialize();
+    await ensureIsolatedTestAdmin();
 
     const branches = serverStore.getBranches();
     const primaryBranch = branches[0];

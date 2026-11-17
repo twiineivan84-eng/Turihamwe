@@ -153,7 +153,7 @@ CREATE INDEX IF NOT EXISTS idx_turihamwe_account ON turihamwe_plans(sacco_accoun
 CREATE INDEX IF NOT EXISTS idx_turihamwe_expiry ON turihamwe_plans(current_expiry_date);
 CREATE INDEX IF NOT EXISTS idx_turihamwe_status ON turihamwe_plans(status);
 
--- 11. BENEFICIARIES
+-- 11. BENEFICIARIES (Unlimited per member plan; Approved categories: Biological Child, Biological Parent, Spouse)
 CREATE TABLE IF NOT EXISTS beneficiaries (
     id VARCHAR(64) PRIMARY KEY,
     sacco_account_number VARCHAR(64) NOT NULL REFERENCES members(sacco_account_number) ON DELETE CASCADE,
@@ -163,7 +163,11 @@ CREATE TABLE IF NOT EXISTS beneficiaries (
     national_id_number VARCHAR(32),
     contact_phone VARCHAR(32),
     percentage_allocation NUMERIC(5,2) DEFAULT 100.00,
+    status VARCHAR(20) NOT NULL DEFAULT 'ALIVE' CHECK (status IN ('ALIVE', 'DECEASED')),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_deceased BOOLEAN NOT NULL DEFAULT FALSE,
+    deceased_date TIMESTAMP WITH TIME ZONE,
+    deceased_reason TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

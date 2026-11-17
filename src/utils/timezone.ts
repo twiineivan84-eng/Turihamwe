@@ -434,3 +434,35 @@ export function calculateUgandaAge(
       : undefined,
   };
 }
+
+/**
+ * NYAMUYANJA SACCO APPROVED BENEFICIARY RELATIONSHIPS
+ * Under the revised Turihamwe policy, ONLY these 3 relationship categories are permitted:
+ * 1. BIOLOGICAL CHILD
+ * 2. BIOLOGICAL PARENT
+ * 3. SPOUSE
+ * All other relationships (Caretaker, Aunt, Uncle, Sibling, Cousin, Grandparent, Guardian, Other) are strictly disallowed.
+ */
+export const PERMITTED_BENEFICIARY_RELATIONSHIPS = [
+  'BIOLOGICAL CHILD',
+  'BIOLOGICAL PARENT',
+  'SPOUSE',
+] as const;
+
+export function isPermittedBeneficiaryRelationship(rel: string | undefined | null): boolean {
+  if (!rel) return false;
+  const upper = rel.trim().toUpperCase();
+  return (
+    upper === 'BIOLOGICAL CHILD' ||
+    upper === 'BIOLOGICAL PARENT' ||
+    upper === 'SPOUSE'
+  );
+}
+
+export function formatBeneficiaryRelationship(rel: string): 'Biological Child' | 'Biological Parent' | 'Spouse' {
+  const upper = rel.trim().toUpperCase();
+  if (upper === 'BIOLOGICAL CHILD') return 'Biological Child';
+  if (upper === 'BIOLOGICAL PARENT') return 'Biological Parent';
+  return 'Spouse';
+}
+

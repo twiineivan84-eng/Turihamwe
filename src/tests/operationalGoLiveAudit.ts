@@ -7,7 +7,7 @@
  * - Checklist B: Branch & Role Security
  * - Checklist C: Database Persistence, Integrity & Backups
  * - Checklist D: Financial & Member Data Safety
- * - Checklist E: SMS Engine & Africa's Talking Gateway
+ * - Checklist E: SMS Engine & Pandora Networks SMS Gateway
  */
 
 import fetch from 'node-fetch';

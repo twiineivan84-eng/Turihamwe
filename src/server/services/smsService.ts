@@ -156,7 +156,7 @@ export class SmsService {
   }
 
   /**
-   * Dispatch an SMS message through the designated provider API (Pandora or Africa's Talking)
+   * Dispatch an SMS message through the exclusive provider API (Pandora Networks)
    */
   public static async dispatchMessage(messageId: string): Promise<{ success: boolean; message: SmsMessage; error?: string }> {
     const sms = serverStore.getSmsById(messageId);
@@ -496,7 +496,7 @@ export class SmsService {
   }
 
   /**
-   * Process Africa's Talking Delivery Report (DLR) callback idempotently.
+   * Process Pandora Networks Delivery Report (DLR) callback idempotently.
    */
   public static processDeliveryReport(params: {
     id: string;

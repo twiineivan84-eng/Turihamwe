@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS turihamwe_plans (
     sync_status TEXT NOT NULL DEFAULT 'SYNCED'
 );
 
--- 11. LOCAL BENEFICIARIES
+-- 11. LOCAL BENEFICIARIES (Unlimited per member plan; Approved categories: Biological Child, Biological Parent, Spouse)
 CREATE TABLE IF NOT EXISTS beneficiaries (
     id TEXT PRIMARY KEY,
     sacco_account_number TEXT NOT NULL,
@@ -147,7 +147,11 @@ CREATE TABLE IF NOT EXISTS beneficiaries (
     national_id_number TEXT,
     contact_phone TEXT,
     percentage_allocation REAL DEFAULT 100.0,
+    status TEXT NOT NULL DEFAULT 'ALIVE',
     is_active INTEGER NOT NULL DEFAULT 1,
+    is_deceased INTEGER NOT NULL DEFAULT 0,
+    deceased_date TEXT,
+    deceased_reason TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     sync_status TEXT NOT NULL DEFAULT 'SYNCED'

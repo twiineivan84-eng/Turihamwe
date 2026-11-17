@@ -8,7 +8,7 @@
 
 ## 1. System Overview
 
-The **Turihamwe Management System** is a dedicated welfare and bereavement management system engineered specifically for **Nyamuyanja SACCO Ltd** in Isingiro, Uganda. Operating across 6 branches—**Kamubeizi, Nyamuyanja (HQ), Kagarama, Nyakigyera, Ruborogota, and Masha**—the platform delivers social protection coverage, transparent member enrolment, contribution tracking, policy renewal management, document-backed claim dockets, in-system operational alerts, automated SMS notifications via Africa's Talking Uganda, and cryptographic database backup and recovery.
+The **Turihamwe Management System** is a dedicated welfare and bereavement management system engineered specifically for **Nyamuyanja SACCO Ltd** in Isingiro, Uganda. Operating across 6 branches—**Kamubeizi, Nyamuyanja (HQ), Kagarama, Nyakigyera, Ruborogota, and Masha**—the platform delivers social protection coverage, transparent member enrolment, contribution tracking, policy renewal management, document-backed claim dockets, in-system operational alerts, automated SMS notifications via Pandora Networks Uganda, and cryptographic database backup and recovery.
 
 ### Critical Institutional Architectural Boundaries
 1. **Core Banking Separation:** The Turihamwe system is strictly isolated from Nyamuyanja SACCO's internal core banking server to protect transactional financial ledgers and regulatory compliance.
@@ -24,7 +24,7 @@ The **Turihamwe Management System** is a dedicated welfare and bereavement manag
 - **Local Persistence (Edge / Offline):** SQL.js (WebAssembly SQLite) / Dexie.js (IndexedDB)
 - **Central Database (Cloud Server):** PostgreSQL (schema provided in `src/db/central/schema.sql`) / Persistent atomic JSON store (`data/turihamwe_central_db.json`)
 - **Security & Cryptography:** `bcryptjs` (salt rounds: 10), JSON Web Tokens (12-hour expiration, token denylist for immediate revocation), Node.js `crypto` (SHA-256 for backup manifests)
-- **Telecom & SMS Gateway:** Africa's Talking Uganda SMS API / Sandbox integration with E.164 sanitization (`+256...`) and idempotency deduplication keys
+- **Telecom & SMS Gateway:** Pandora Networks Uganda SMS API integration with E.164 sanitization (`+256...` / `256...`) and idempotency deduplication keys
 
 ---
 
@@ -75,7 +75,7 @@ The **Turihamwe Management System** is a dedicated welfare and bereavement manag
 │       ├── DashboardView.tsx        # KPI summaries, expiring policies, recent activity
 │       ├── MembersView.tsx          # Member search, 5-day lock rule, controlled corrections
 │       ├── ReportsView.tsx          # Branch summaries, financial gating, CSV/Excel export
-│       ├── SmsNotificationsView.tsx # SMS queue, Africa's Talking templates, dispatch
+│       ├── SmsNotificationsView.tsx # SMS queue, Pandora Networks templates, dispatch
 │       ├── SystemView.tsx           # System health, backups, sync queue, business rules
 │       ├── TurihamweView.tsx        # Plan registration, beneficiaries, contributions
 │       └── UsersAndRightsView.tsx   # User provisioning, roles, granular permission matrix
@@ -151,9 +151,9 @@ npm test
 
 ### Test Suite Summary
 - **Phase 2 (13 Tests):** Member registration, account number uniqueness, 5-day lock window, controlled corrections, branch restrictions, offline queueing.
-- **Phase 6 (10 Tests):** Multi-category reports, financial permission masking, export audit logs, Africa's Talking SMS queue, deduplication keys, 30/14/7-day expiry triggers.
+- **Phase 6 (10 Tests):** Multi-category reports, financial permission masking, export audit logs, Pandora Networks SMS queue, deduplication keys, exact-date expiry triggers.
 - **Phase 7 (18 Tests):** 4-10 char username rule, bcrypt hashing, single-branch isolation, session invalidation on logout, effective permissions matrix, user enable/disable, SHA-256 backup verification, controlled database restore.
-- **Phase 8 (16 Tests):** End-to-end entity lifecycle, data consistency, calendar-day 5-day rule, search boundary enforcement, claim separation of duties, document executable rejection, Africa's Talking E.164 formatting, atomic disk save, 6 branches configuration with Kamubeizi priority, business rules safety.
+- **Phase 8 (16 Tests):** End-to-end entity lifecycle, data consistency, calendar-day 5-day rule, search boundary enforcement, claim separation of duties, document executable rejection, Pandora Networks E.164 formatting, atomic disk save, 6 branches configuration with Kamubeizi priority, business rules safety.
 
 ```bash
 # Run static type checking and linter

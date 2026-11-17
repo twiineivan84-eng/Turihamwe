@@ -114,11 +114,26 @@ authRouter.post('/switch-branch', requireAuth, (req: AuthenticatedRequest, res: 
   res.json(result);
 });
 
-// Initial administrator setup mechanism
+// Initial administrator setup mechanism (strictly allowed ONLY when zero users exist)
 authRouter.post('/setup-admin', async (req: Request, res: Response) => {
   try {
+    if (!serverStore.isDatabaseHealthy()) {
+      res.status(503).json({
+        success: false,
+        message: serverStore.getDatabaseError() || 'Database is unavailable.',
+      });
+      return;
+    }
+
     const users = serverStore.getUsers();
-    // Allow setup if no users exist or specifically requested
+    if (users.length > 0) {
+      res.status(403).json({
+        success: false,
+        message: 'Initial administrator setup is disabled: institutional staff accounts already exist.',
+      });
+      return;
+    }
+
     const { username, fullName, password, primaryBranchId, email, phone } = req.body;
 
     if (!username || !fullName || !password || !primaryBranchId) {

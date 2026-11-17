@@ -14,7 +14,7 @@
  * 10. Claim Document Security (file type rejection, size boundary, docket isolation, audit)
  * 11. Sensitive Data Masking (passwords, tokens, and hashes never in audit or API payloads)
  * 12. Financial Report Permission Gating (totals redacted from unauthorized viewers)
- * 13. Africa's Talking SMS Boundary (Uganda format, deduplication, offline queueing)
+ * 13. Pandora Networks SMS Boundary (Uganda format, deduplication, offline queueing)
  * 14. Atomic Persistence & Transaction Safety
  * 15. Six Branch Configuration & Kamubeizi Priority in Dropdown
  * 16. Configurable Business Rules Safety (No invented unconfirmed values)
@@ -592,7 +592,7 @@ export class Phase8TestRunner {
     }
 
     // ==========================================
-    // TEST 13: AFRICA\'S TALKING SMS INTEGRATION BOUNDARY
+    // TEST 13: PANDORA NETWORKS SMS INTEGRATION BOUNDARY
     // ==========================================
     try {
       const rawUgandan = '0701234567';
@@ -723,9 +723,9 @@ export class Phase8TestRunner {
         rules.alertSchedule?.triggerEvent === 'EXACT_MATURITY_DATE' &&
         rules.alertSchedule?.advanceRemindersEnabled === false;
 
-      // Policy 7: Membership Limits (max 13, max 70 years)
+      // Policy 7: Membership Limits (unlimited family members, max 70 years)
       const hasMembershipLimits =
-        rules.membershipLimits?.maxFamilyMembers === 13 &&
+        (rules.membershipLimits?.maxFamilyMembers === null || rules.membershipLimits?.maxFamilyMembers === undefined) &&
         rules.membershipLimits?.maxBeneficiaryAgeYears === 70;
 
       const passed =
@@ -740,7 +740,7 @@ export class Phase8TestRunner {
         name: 'Established Turihamwe Operational Parameters (Policies 1–10)',
         passed,
         message: passed
-          ? 'All 11 operational parameters verified: Registration 25k, Renewal 20k, Reactivation 25k, Benefit 500k, Annual frequency, 12m duration, Exact maturity SMS, Max 13 members, Max 70 yrs age cap'
+          ? 'All operational parameters verified: Registration 25k, Renewal 20k, Reactivation 25k, Benefit 500k, Annual frequency, 12m duration, Exact maturity SMS, Unlimited beneficiaries, Max 70 yrs age cap'
           : 'Business rule established parameters verification failed',
       });
     } catch (err: any) {

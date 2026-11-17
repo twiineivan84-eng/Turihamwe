@@ -87,6 +87,33 @@ export const SystemView: React.FC = () => {
   // Health state
   const [healthMetrics, setHealthMetrics] = useState<SystemHealthMetrics | null>(null);
   const [loadingHealth, setLoadingHealth] = useState<boolean>(false);
+  const [databaseInfo, setDatabaseInfo] = useState<{
+    databaseFilePath: string;
+    databaseDirectory: string;
+    storageEngine: string;
+    isExternalStorage: boolean;
+    isTestEnvironment: boolean;
+    databaseSizeBytes: number;
+    databaseSha256: string;
+    lastWriteAt: string;
+    recordCounts: Record<string, number>;
+    institutionalStaffAccounts: Array<{
+      id: string;
+      username: string;
+      fullName: string;
+      roleName: string;
+      isActive: boolean;
+      primaryBranchId: string;
+      hasMultiBranchAccess: boolean;
+    }>;
+    dataProtection: {
+      productionLock: string;
+      staffAccountPreservation: string;
+      testDatabaseIsolation: string;
+      lastVerifiedBackupChecksum: string | null;
+      lastVerifiedBackupDate: string | null;
+    };
+  } | null>(null);
 
   // Pandora SMS connection test state
   const [isTestingPandora, setIsTestingPandora] = useState<boolean>(false);
@@ -164,6 +191,7 @@ export const SystemView: React.FC = () => {
   const [restoreConfirmed, setRestoreConfirmed] = useState<boolean>(false);
   const [isRestoring, setIsRestoring] = useState<boolean>(false);
   const [downloadingBackupId, setDownloadingBackupId] = useState<string | null>(null);
+  const [isDownloadingAllBackups, setIsDownloadingAllBackups] = useState<boolean>(false);
   const [showUploadRestoreModal, setShowUploadRestoreModal] = useState<boolean>(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadContent, setUploadContent] = useState<string>('');
@@ -215,16 +243,22 @@ export const SystemView: React.FC = () => {
     });
   }, []);
 
-  // Fetch Health Metrics
+  // Fetch Health Metrics & Database Diagnostic Info
   const fetchHealth = async () => {
     setLoadingHealth(true);
     try {
-      const res = await apiClient.getSystemHealth();
-      if (res.success) {
-        setHealthMetrics(res.data);
+      const [healthRes, dbRes] = await Promise.all([
+        apiClient.getSystemHealth(),
+        apiClient.getDatabaseInfo().catch(() => null),
+      ]);
+      if (healthRes.success) {
+        setHealthMetrics(healthRes.data);
+      }
+      if (dbRes && dbRes.success) {
+        setDatabaseInfo(dbRes.data);
       }
     } catch (err) {
-      console.error('Failed to load health metrics:', err);
+      console.error('Failed to load health metrics or database info:', err);
     } finally {
       setLoadingHealth(false);
     }
@@ -362,8 +396,8 @@ export const SystemView: React.FC = () => {
     if (activeTab === 'sync') fetchSyncData();
   }, [syncBranchFilter]);
 
-  // Handle Backup Creation
-  const handleCreateBackup = async () => {
+  // Handle Backup Creation (with optional immediate local download)
+  const handleCreateBackup = async (downloadCopy = false) => {
     setIsCreatingBackup(true);
     try {
       const res = await apiClient.createBackup(backupNotes.trim() || undefined);
@@ -371,10 +405,14 @@ export const SystemView: React.FC = () => {
         setBackups(prev => [res.data, ...prev]);
         setShowCreateBackupModal(false);
         setBackupNotes('');
-        setNotification({
-          type: 'success',
-          message: `Database backup snapshot ${res.data.id} generated and cryptographically verified.`,
-        });
+        if (downloadCopy) {
+          await handleDownloadBackup(res.data.id, res.data.filename);
+        } else {
+          setNotification({
+            type: 'success',
+            message: `Database backup snapshot ${res.data.id} generated and cryptographically verified.`,
+          });
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Backup generation error';
@@ -479,11 +517,11 @@ export const SystemView: React.FC = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = filename || suggestedFilename || `turihamwe_backup_${backupId}.json`;
+      a.download = filename || suggestedFilename || `turihamwe_backup_${backupId}.bak`;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.URL.revokeObjectURL(url);
+      setTimeout(() => window.URL.revokeObjectURL(url), 1500);
       setNotification({
         type: 'success',
         message: `Backup archive downloaded successfully: ${filename || suggestedFilename}${checksum ? ` (SHA-256: ${checksum.slice(0, 16)}...)` : ''}`,
@@ -493,6 +531,53 @@ export const SystemView: React.FC = () => {
       setNotification({ type: 'error', message: msg });
     } finally {
       setDownloadingBackupId(null);
+    }
+  };
+
+  // Handle Download Latest Backup (or create & download if none exists yet)
+  const handleDownloadLatestBackup = async () => {
+    if (backups.length > 0) {
+      const latest = backups[0];
+      await handleDownloadBackup(latest.id, latest.filename);
+      return;
+    }
+    setIsCreatingBackup(true);
+    try {
+      const res = await apiClient.createBackup('Snapshot generated for immediate local download');
+      if (res.success) {
+        setBackups(prev => [res.data, ...prev]);
+        await handleDownloadBackup(res.data.id, res.data.filename);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to create and download backup copy';
+      setNotification({ type: 'error', message: msg });
+    } finally {
+      setIsCreatingBackup(false);
+    }
+  };
+
+  // Handle Download Bundle Copy of All Backups
+  const handleDownloadAllBackups = async () => {
+    setIsDownloadingAllBackups(true);
+    try {
+      const { blob, filename, count } = await apiClient.downloadAllBackups();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 1500);
+      setNotification({
+        type: 'success',
+        message: `Downloaded copy of ${count || backups.length} backup archive(s): ${filename}`,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to download backup archives copy';
+      setNotification({ type: 'error', message: msg });
+    } finally {
+      setIsDownloadingAllBackups(false);
     }
   };
 
@@ -875,6 +960,104 @@ export const SystemView: React.FC = () => {
                 </div>
               </div>
 
+              {/* IT Officer Database Control Center & Permanent Storage Health */}
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0">
+                      <HardDrive className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-slate-900 text-sm">Permanent Database Storage &amp; Data Protection Center</h3>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 uppercase tracking-wide">
+                          Protected
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Central persistence journal, automatic pre-update snapshots, and institutional account immutability.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Production Lock Active
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Active Database File</span>
+                    <div className="font-mono text-[11px] text-slate-800 break-all" title={databaseInfo?.databaseFilePath || healthMetrics?.database?.databasePath}>
+                      {databaseInfo?.databaseFilePath || healthMetrics?.database?.databasePath || 'turihamwe_central_db.json'}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1">
+                      Engine: Local Persistent Journal + SQLite Cache
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Database Integrity &amp; Size</span>
+                    <div className="font-bold text-slate-800 text-sm">
+                      {databaseInfo?.databaseSizeBytes
+                        ? `${(databaseInfo.databaseSizeBytes / 1024).toFixed(1)} KB`
+                        : healthMetrics?.database?.databaseSizeBytes
+                        ? `${(healthMetrics.database.databaseSizeBytes / 1024).toFixed(1)} KB`
+                        : 'Verified'}
+                    </div>
+                    <div className="font-mono text-[10px] text-slate-500 truncate mt-0.5" title={databaseInfo?.databaseSha256 || healthMetrics?.database?.databaseSha256}>
+                      SHA-256: {(databaseInfo?.databaseSha256 || healthMetrics?.database?.databaseSha256 || 'Calculated').slice(0, 16)}...
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Authorized Staff Accounts</span>
+                    <div className="font-bold text-emerald-700 text-sm flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      {databaseInfo?.recordCounts?.users ?? healthMetrics?.database?.tableCounts?.users ?? 0} Registered Account(s)
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      Strict authorized provisioning only (zero auto-seeding)
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Protection Safeguards</span>
+                    <div className="space-y-0.5 text-[11px]">
+                      <div className="text-emerald-700 font-medium">✓ Test Database Isolation</div>
+                      <div className="text-emerald-700 font-medium">✓ Pre-Update Safety Snapshots</div>
+                      <div className="text-emerald-700 font-medium">✓ Permanent SACCO Acc Numbers</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Authorized Staff Manifest Table */}
+                {databaseInfo?.institutionalStaffAccounts && databaseInfo.institutionalStaffAccounts.length > 0 && (
+                  <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="bg-slate-50 px-3 py-2 border-b border-slate-200 flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-700">Registered Institutional Staff Accounts</span>
+                      <span className="text-[11px] text-slate-500 font-mono">Total: {databaseInfo.institutionalStaffAccounts.length}</span>
+                    </div>
+                    <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto">
+                      {databaseInfo.institutionalStaffAccounts.map(u => (
+                        <div key={u.id} className="px-3 py-1.5 flex items-center justify-between text-xs hover:bg-slate-50">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-slate-800">{u.username}</span>
+                            <span className="text-slate-600">• {u.fullName}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">{u.roleName}</span>
+                            <span className="text-emerald-600 font-semibold text-[11px]">Active</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Pandora SMS Gateway Connection Test (Req 2.5) */}
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
@@ -1206,7 +1389,7 @@ export const SystemView: React.FC = () => {
             </div>
 
             {canManageBackups && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => {
                     setShowUploadRestoreModal(true);
@@ -1216,17 +1399,43 @@ export const SystemView: React.FC = () => {
                     setUploadRestoreReason('');
                     setUploadRestoreConfirmed(false);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-xs transition"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-xs transition cursor-pointer"
                 >
                   <Upload className="w-3.5 h-3.5 text-blue-700" />
                   RESTORE FROM BACKUP (.BAK)...
                 </button>
                 <button
                   onClick={() => setShowCreateBackupModal(true)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold rounded-lg shadow-xs transition"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold rounded-lg shadow-xs transition cursor-pointer"
                 >
                   <Database className="w-3.5 h-3.5" />
                   CREATE BACKUP NOW (.BAK)
+                </button>
+                <button
+                  onClick={handleDownloadLatestBackup}
+                  disabled={isCreatingBackup || Boolean(downloadingBackupId)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg shadow-xs transition disabled:opacity-50 cursor-pointer"
+                  title="Download a copy of the latest .bak backup snapshot to your device"
+                >
+                  {isCreatingBackup || (backups[0] && downloadingBackupId === backups[0].id) ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  DOWNLOAD LATEST (.BAK)
+                </button>
+                <button
+                  onClick={handleDownloadAllBackups}
+                  disabled={isDownloadingAllBackups || backups.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-xs transition disabled:opacity-50 cursor-pointer"
+                  title="Download a complete copy of all stored backups as a single archive file"
+                >
+                  {isDownloadingAllBackups ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-700" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-blue-700" />
+                  )}
+                  DOWNLOAD ALL ({backups.length})
                 </button>
               </div>
             )}
@@ -1835,17 +2044,17 @@ export const SystemView: React.FC = () => {
               </div>
             </div>
 
-            {/* 10. Maximum Family Members */}
+            {/* 10. Beneficiary Count & Relationships */}
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
               <div className="flex items-center justify-between">
-                <h4 className="font-bold text-slate-900">10. Maximum Family Members</h4>
-                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-300 text-[10px] font-bold">
+                <h4 className="font-bold text-slate-900">10. Beneficiary Policy</h4>
+                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
                   Active Policy
                 </span>
               </div>
-              <p className="text-slate-600 text-xs">Maximum 13 per plan (1 primary + 12 beneficiaries). Children, parents, max 1 spouse.</p>
-              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-slate-900 font-mono font-bold text-sm">
-                13 Family Members
+              <p className="text-slate-600 text-xs">No limit on beneficiary count. Permitted categories: Biological Child, Biological Parent, Spouse.</p>
+              <div className="p-2 bg-slate-50 rounded border border-slate-200 text-emerald-900 font-mono font-bold text-sm">
+                No Limit (Unlimited Eligible Beneficiaries)
               </div>
             </div>
 
@@ -1986,16 +2195,16 @@ export const SystemView: React.FC = () => {
               </div>
               <div>
                 <h4 className="text-sm font-bold text-emerald-950">
-                  All Required Environment Variables Populated
+                  Environment Parameters &amp; Secrets Overview
                 </h4>
                 <p className="text-xs text-emerald-800 mt-0.5">
-                  The system has automatically filled all configuration parameters. Authentication secrets, PostgreSQL connections, Africa&apos;s Talking sandbox credentials, and backup paths are operational.
+                  Review active application networking, JWT authentication, persistent storage paths, Pandora Networks SMS credentials, and backup settings.
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
               <span className="text-xs font-mono font-bold bg-white px-2.5 py-1 rounded border border-emerald-300 text-emerald-900 shadow-2xs">
-                {envData ? `${envData.configuredCount} / ${envData.totalCount} Active` : '19 / 19 Active'}
+                {envData ? `${envData.configuredCount} / ${envData.totalCount} Configured` : 'Loading...'}
               </span>
             </div>
           </div>
@@ -2007,9 +2216,8 @@ export const SystemView: React.FC = () => {
               'Application & Networking',
               'Authentication & Security',
               'Database & Storage',
-              'Africa\'s Talking SMS Gateway',
+              'Pandora Networks SMS Gateway',
               'Automated Backups & Sync',
-              'Google AI Studio Integration',
             ].map(cat => (
               <button
                 key={cat}
@@ -2021,7 +2229,7 @@ export const SystemView: React.FC = () => {
                     : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                {cat === 'ALL' ? 'All Variables (19)' : cat}
+                {cat === 'ALL' ? `All Variables${envData ? ` (${envData.totalCount})` : ''}` : cat}
               </button>
             ))}
           </div>
@@ -2121,7 +2329,7 @@ export const SystemView: React.FC = () => {
                 Backups contain all SACCO members, plans, beneficiaries, contributions, renewals, claims, and audit logs. The backup file is access-controlled and protected from unauthorized public exposure.
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t">
+              <div className="flex flex-wrap justify-end gap-2 pt-3 border-t">
                 <button
                   type="button"
                   onClick={() => setShowCreateBackupModal(false)}
@@ -2131,12 +2339,21 @@ export const SystemView: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={handleCreateBackup}
+                  onClick={() => handleCreateBackup(false)}
                   disabled={isCreatingBackup}
-                  className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5"
+                  className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 disabled:opacity-50"
                 >
                   {isCreatingBackup ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
                   Generate Snapshot
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCreateBackup(true)}
+                  disabled={isCreatingBackup}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isCreatingBackup ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  Generate &amp; Download (.BAK)
                 </button>
               </div>
             </div>

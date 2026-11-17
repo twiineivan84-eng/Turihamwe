@@ -1,4 +1,5 @@
 import path from 'path';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 
 // Load environment variables from .env if present
@@ -26,6 +27,7 @@ export interface AppConfig {
 export interface AuthConfig {
   jwtSecret: string;
   jwtExpiry: string;
+  usingEphemeralJwtSecret?: boolean;
 }
 
 export interface DatabaseConfig {
@@ -83,6 +85,8 @@ export interface SystemConfig {
   sync: SyncConfig;
 }
 
+const KNOWN_DEV_JWT_PLACEHOLDER = 'dev-jwt-secret-turihamwe-sacco-enterprise-auth-key-min32chars';
+
 /**
  * Validates and constructs the system configuration.
  * Throws a clean ConfigurationError without exposing secret values if critical production variables are absent.
@@ -93,8 +97,17 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
   const isDevelopment = nodeEnv === 'development';
   const isTest = nodeEnv === 'test';
 
+  // Isolate automated tests so test suites NEVER touch production data or write into data/backups
+  const isTestEnvironment =
+    isTest ||
+    env.TUR_TEST_ENV === 'true' ||
+    process.argv.some(a => a.includes('runAllSuites') || a.includes('.test.'));
+  if (isTestEnvironment) {
+    process.env.TUR_TEST_ENV = 'true';
+  }
+
   const rawPort = parseInt(env.PORT || '3000', 10);
-  const port = rawPort === 8080 ? 3000 : rawPort;
+  const port = isNaN(rawPort) || rawPort === 8080 ? 3000 : rawPort;
   const appUrl = env.APP_URL || (isProduction ? 'https://turihamwe.nyamuyanjasacco.ug' : `http://localhost:${port}`);
 
   // CORS configuration: in production parse comma-separated allowed origins; in dev allow safe fallback
@@ -103,9 +116,29 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
     : [appUrl];
 
   // Authentication configuration
-  const jwtSecret = (env.JWT_SECRET && env.JWT_SECRET.length >= 32)
-    ? env.JWT_SECRET
-    : 'dev-jwt-secret-turihamwe-sacco-enterprise-auth-key-min32chars';
+  const providedJwt = (env.JWT_SECRET || '').trim();
+  const hasValidProdJwt = providedJwt.length >= 32 && providedJwt !== KNOWN_DEV_JWT_PLACEHOLDER;
+  let jwtSecret: string;
+  let usingEphemeralJwtSecret = false;
+
+  if (hasValidProdJwt) {
+    jwtSecret = providedJwt;
+  } else if (isProduction && !isTestEnvironment) {
+    if (env.STRICT_PROD_CONFIG === 'true') {
+      throw new ConfigurationError(
+        'JWT_SECRET',
+        'Production JWT_SECRET must be at least 32 characters and must not use the development placeholder.'
+      );
+    }
+    console.error(
+      '[CONFIG][CRITICAL SECURITY WARNING] Production JWT_SECRET is missing or uses the development placeholder. Using an ephemeral runtime secret; configure a persistent 32+ char JWT_SECRET in production environment.'
+    );
+    jwtSecret = crypto.randomBytes(48).toString('hex');
+    usingEphemeralJwtSecret = true;
+  } else {
+    jwtSecret = providedJwt.length >= 32 ? providedJwt : KNOWN_DEV_JWT_PLACEHOLDER;
+  }
+
   const rawJwtExpiry = (env.JWT_EXPIRY || '').trim();
   const isValidExpiry = /^(\d+[smhdwy]?|\d+)$/.test(rawJwtExpiry);
   const jwtExpiry = isValidExpiry ? rawJwtExpiry : '12h';
@@ -119,10 +152,6 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
   const rawPgPort = parseInt(env.PGPORT || '5432', 10);
   const pgPort = isNaN(rawPgPort) ? 5432 : rawPgPort;
 
-  if (isProduction && !databaseUrl && (!env.PGHOST || !env.PGDATABASE)) {
-    console.warn('[CONFIG] DATABASE_URL not set for central PostgreSQL; operating in Local_Transactional_Journal persistence mode.');
-  }
-
   function isPlaceholder(val: string | undefined): boolean {
     if (!val) return true;
     const v = val.trim().toLowerCase();
@@ -135,7 +164,9 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
       v.includes('the password') ||
       v.includes('configured on your') ||
       v.includes('expected by your') ||
-      v.includes('generate a ')
+      v.includes('generate a ') ||
+      v.includes('replace_with_') ||
+      v.includes('your_pandora_password_here')
     );
   }
 
@@ -144,12 +175,34 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
     return val.trim();
   }
 
-  const rawDataDir = cleanEnvVal(env.DATA_STORAGE_DIR, 'data');
-  const dataDir = path.resolve(process.cwd(), rawDataDir);
-  const rawDataFile = cleanEnvVal(env.DATA_FILE_NAME, 'turihamwe_central_db.json');
+  // Resolve persistent storage directory (supports external mount, TUR_PERSISTENT_DATA_DIR, DATA_STORAGE_DIR, APPDATA, or local ./data)
+  const hasExplicitPersistentDir = Boolean(
+    cleanEnvVal(env.TUR_PERSISTENT_DATA_DIR || env.DATA_STORAGE_DIR, '')
+  );
+  let rawDataDir = cleanEnvVal(env.TUR_PERSISTENT_DATA_DIR || env.DATA_STORAGE_DIR, '');
+  if (!rawDataDir) {
+    if (env.TUR_USE_SYSTEM_APPDATA === 'true' && env.APPDATA) {
+      rawDataDir = path.join(env.APPDATA, 'NyamuyanjaSACCO', 'Turihamwe', 'data');
+    } else {
+      rawDataDir = 'data';
+    }
+  }
+  const dataDir = path.isAbsolute(rawDataDir) ? rawDataDir : path.resolve(process.cwd(), rawDataDir);
+
+  if (isProduction && !isTestEnvironment && !hasExplicitPersistentDir) {
+    console.warn(
+      `[CONFIG] TUR_PERSISTENT_DATA_DIR not explicitly set in production; using '${dataDir}'. Ensure this directory is backed by durable host/volume storage.`
+    );
+  }
+
+  const defaultDbFileName = isTestEnvironment ? 'turihamwe_test_suite_db.json' : 'turihamwe_central_db.json';
+  const rawDataFile = cleanEnvVal(env.DATA_FILE_NAME, defaultDbFileName);
   const dataFile = path.resolve(dataDir, rawDataFile);
-  const rawSqlitePath = cleanEnvVal(env.SQLITE_DATABASE_PATH, path.resolve(dataDir, 'turihamwe-local.sqlite'));
-  const sqlitePath = path.resolve(process.cwd(), rawSqlitePath);
+  const defaultSqlitePath = path.join(dataDir, isTestEnvironment ? 'turihamwe-test.sqlite' : 'turihamwe-local.sqlite');
+  const rawSqlitePath = hasExplicitPersistentDir && !env.SQLITE_DATABASE_PATH
+    ? defaultSqlitePath
+    : cleanEnvVal(env.SQLITE_DATABASE_PATH, defaultSqlitePath);
+  const sqlitePath = path.isAbsolute(rawSqlitePath) ? rawSqlitePath : path.resolve(process.cwd(), rawSqlitePath);
 
   // SMS Gateway Configuration (Exclusive Provider: Pandora Networks)
   const smsEnabled = env.SMS_ENABLED !== 'false';
@@ -175,7 +228,7 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
   const rawSender = cleanEnvVal(env.PANDORA_SMS_SENDER_ID, 'NYAMUYANJA');
   const pandoraSenderId = rawSender.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11) || 'NYAMUYANJA';
 
-  if (isProduction && smsEnabled && process.env.NODE_ENV === 'production' && !process.env.CI) {
+  if (isProduction && smsEnabled && !isTestEnvironment && !process.env.CI) {
     if (!pandoraPhoneNumber) {
       console.warn('[CONFIG] PANDORA_SMS_PHONE_NUMBER is not set. SMS dispatch will queue messages until configured.');
     }
@@ -184,15 +237,25 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
     }
   }
 
-  // File Storage Configuration
-  const rawUploadPath = cleanEnvVal(env.FILE_STORAGE_PATH, path.join(dataDir, 'uploads'));
-  const uploadPath = path.resolve(process.cwd(), rawUploadPath);
+  // File Storage Configuration (isolated for tests so test uploads never pollute production uploads)
+  const rawUploadPath = isTestEnvironment
+    ? cleanEnvVal(env.TUR_TEST_UPLOAD_DIR, path.join(dataDir, 'test_uploads'))
+    : cleanEnvVal(env.FILE_STORAGE_PATH, path.join(dataDir, 'uploads'));
+  const uploadPath = path.isAbsolute(rawUploadPath) ? rawUploadPath : path.resolve(process.cwd(), rawUploadPath);
   const maxUploadSizeMb = parseInt(env.MAX_UPLOAD_SIZE_MB || '10', 10);
 
-  // Backup Configuration
+  // Backup Configuration (strictly isolated so automated tests NEVER write into production data/backups)
   const backupEnabled = env.BACKUP_ENABLED !== 'false';
-  const rawBackupStorage = cleanEnvVal(env.BACKUP_STORAGE_DIR, path.join(dataDir, 'backups'));
-  const backupStoragePath = path.resolve(process.cwd(), rawBackupStorage);
+  const defaultProdBackupDir = path.join(dataDir, 'backups');
+  const rawBackupStorage = isTestEnvironment
+    ? cleanEnvVal(env.TUR_TEST_BACKUP_DIR, path.join(dataDir, 'test_backups'))
+    : cleanEnvVal(
+        env.BACKUP_STORAGE_DIR,
+        hasExplicitPersistentDir ? defaultProdBackupDir : cleanEnvVal(env.BACKUP_STORAGE_PATH, defaultProdBackupDir)
+      );
+  const backupStoragePath = path.isAbsolute(rawBackupStorage)
+    ? rawBackupStorage
+    : path.resolve(process.cwd(), rawBackupStorage);
   const backupEncryptionKey = isPlaceholder(env.BACKUP_ENCRYPTION_KEY) ? undefined : env.BACKUP_ENCRYPTION_KEY;
 
   // Synchronization Configuration
@@ -213,6 +276,7 @@ export function loadConfiguration(env: NodeJS.ProcessEnv = process.env): SystemC
     auth: {
       jwtSecret,
       jwtExpiry,
+      usingEphemeralJwtSecret,
     },
     database: {
       databaseUrl,

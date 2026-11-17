@@ -50,6 +50,14 @@ import { ReactivatePlanModal } from '../components/turihamwe/ReactivatePlanModal
 import { notifyRecordChanged, subscribeToRecordChanges } from '../utils/systemEvents';
 import { BusinessRulesModal } from '../components/turihamwe/BusinessRulesModal';
 import { RegisterPlanModal } from '../components/turihamwe/RegisterPlanModal';
+import { getUgandaYearMonth } from '../utils/timezone';
+import {
+  EXPIRY_MONTH_OPTIONS,
+  ExpiryHorizonFilter,
+  filterUpcomingExpiryRecords,
+  getAvailableExpiryYears,
+  getDaysInMonthForFilter
+} from '../utils/expiryFilter';
 
 export const TurihamweView: React.FC = () => {
   const { user, workingBranch, hasPermission } = useAuth();
@@ -91,6 +99,13 @@ export const TurihamweView: React.FC = () => {
   const [expiryCategoryFilter, setExpiryCategoryFilter] = useState<string>('ALL');
   const [dateRangeStart, setDateRangeStart] = useState<string>('');
   const [dateRangeEnd, setDateRangeEnd] = useState<string>('');
+
+  // Overview: Upcoming Expiries & Action Queue Filter (Day / Month / Year / Ahead / Custom Date)
+  const [queueExpiryDay, setQueueExpiryDay] = useState<string>('');
+  const [queueExpiryMonth, setQueueExpiryMonth] = useState<string>('');
+  const [queueExpiryYear, setQueueExpiryYear] = useState<string>('');
+  const [queueHorizonFilter, setQueueHorizonFilter] = useState<ExpiryHorizonFilter>('ALL');
+  const [queueShowAll, setQueueShowAll] = useState<boolean>(false);
 
   // Modals
   const [isRecordContribOpen, setIsRecordContribOpen] = useState(false);
@@ -277,6 +292,73 @@ export const TurihamweView: React.FC = () => {
     if (selectedStatus && p.status !== selectedStatus) return false;
     return true;
   });
+
+  // Overview Upcoming Expiries & Action Queue Filtering
+  const ugandaCurrentYearMonth = getUgandaYearMonth();
+  const availableQueueYears = getAvailableExpiryYears(expiryRecords, ugandaCurrentYearMonth.year);
+  const maxQueueDays = getDaysInMonthForFilter(queueExpiryYear, queueExpiryMonth);
+  const availableQueueDays = Array.from({ length: maxQueueDays }, (_, idx) =>
+    String(idx + 1).padStart(2, '0')
+  );
+  const hasQueueExpiryFilter = Boolean(
+    queueExpiryDay || queueExpiryMonth || queueExpiryYear || queueHorizonFilter !== 'ALL'
+  );
+  const filteredQueueExpiries = filterUpcomingExpiryRecords(expiryRecords, {
+    day: queueExpiryDay,
+    month: queueExpiryMonth,
+    year: queueExpiryYear,
+    horizon: queueHorizonFilter,
+  });
+  const customQueueDateValue =
+    queueExpiryYear && queueExpiryMonth && queueExpiryDay
+      ? `${queueExpiryYear}-${queueExpiryMonth}-${queueExpiryDay}`
+      : '';
+  const visibleQueueExpiries =
+    hasQueueExpiryFilter || queueShowAll
+      ? filteredQueueExpiries
+      : filteredQueueExpiries.slice(0, 5);
+
+  const handleQueueYearChange = (newYear: string) => {
+    setQueueExpiryYear(newYear);
+    if (queueExpiryDay) {
+      const maxDays = getDaysInMonthForFilter(newYear, queueExpiryMonth);
+      if (Number(queueExpiryDay) > maxDays) {
+        setQueueExpiryDay('');
+      }
+    }
+  };
+
+  const handleQueueMonthChange = (newMonth: string) => {
+    setQueueExpiryMonth(newMonth);
+    if (queueExpiryDay) {
+      const maxDays = getDaysInMonthForFilter(queueExpiryYear, newMonth);
+      if (Number(queueExpiryDay) > maxDays) {
+        setQueueExpiryDay('');
+      }
+    }
+  };
+
+  const handleQueueCustomDateChange = (dateStr: string) => {
+    if (!dateStr) {
+      setQueueExpiryYear('');
+      setQueueExpiryMonth('');
+      setQueueExpiryDay('');
+      return;
+    }
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (match) {
+      setQueueExpiryYear(match[1]);
+      setQueueExpiryMonth(match[2]);
+      setQueueExpiryDay(match[3]);
+    }
+  };
+
+  const clearQueueExpiryFilters = () => {
+    setQueueExpiryDay('');
+    setQueueExpiryMonth('');
+    setQueueExpiryYear('');
+    setQueueHorizonFilter('ALL');
+  };
 
   return (
     <div className="space-y-6">
@@ -635,27 +717,147 @@ export const TurihamweView: React.FC = () => {
             </div>
 
             {/* Upcoming Policy Expirations Preview */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Clock className="w-4 h-4 text-amber-700" />
                   <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                     Upcoming Expiries & Action Queue
                   </span>
+                  <span className="text-[11px] font-mono font-bold text-slate-500">
+                    ({filteredQueueExpiries.length})
+                  </span>
                 </div>
                 {canViewExpiry && (
                   <button
                     onClick={() => setActiveSubTab('expiry')}
-                    className="text-xs font-bold text-blue-700 hover:underline"
+                    className="text-xs font-bold text-blue-700 hover:underline whitespace-nowrap"
                   >
                     Manage Expiries &rarr;
                   </button>
                 )}
               </div>
 
-              <div className="overflow-x-auto">
+              {/* Day / Month / Year & Ahead Custom Date Filter Bar */}
+              <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <Calendar className="w-3.5 h-3.5 text-blue-700" />
+                    <span>Filter Expiry Date (Day / Month / Year & Ahead)</span>
+                  </div>
+                  {hasQueueExpiryFilter && (
+                    <button
+                      type="button"
+                      onClick={clearQueueExpiryFilters}
+                      className="text-[11px] font-bold text-blue-700 hover:underline"
+                    >
+                      Clear Filter
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  <div>
+                    <label htmlFor="queue-expiry-day" className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+                      Day
+                    </label>
+                    <select
+                      id="queue-expiry-day"
+                      value={queueExpiryDay}
+                      onChange={e => setQueueExpiryDay(e.target.value)}
+                      aria-label="Filter expiry by day"
+                      className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                    >
+                      <option value="">All Days</option>
+                      {availableQueueDays.map(d => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor="queue-expiry-month" className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+                      Month
+                    </label>
+                    <select
+                      id="queue-expiry-month"
+                      value={queueExpiryMonth}
+                      onChange={e => handleQueueMonthChange(e.target.value)}
+                      aria-label="Filter expiry by month"
+                      className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                    >
+                      <option value="">All Months</option>
+                      {EXPIRY_MONTH_OPTIONS.map(m => (
+                        <option key={m.value} value={m.value}>
+                          {m.value} - {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor="queue-expiry-year" className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+                      Year
+                    </label>
+                    <select
+                      id="queue-expiry-year"
+                      value={queueExpiryYear}
+                      onChange={e => handleQueueYearChange(e.target.value)}
+                      aria-label="Filter expiry by year"
+                      className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                    >
+                      <option value="">All Years</option>
+                      {availableQueueYears.map(y => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor="queue-expiry-horizon" className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+                      Ahead Window
+                    </label>
+                    <select
+                      id="queue-expiry-horizon"
+                      value={queueHorizonFilter}
+                      onChange={e => setQueueHorizonFilter(e.target.value as ExpiryHorizonFilter)}
+                      aria-label="Filter expiries ahead"
+                      className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                    >
+                      <option value="ALL">All Dates</option>
+                      <option value="AHEAD">All Ahead</option>
+                      <option value="NEXT_7">Next 7 Days</option>
+                      <option value="NEXT_30">Next 30 Days</option>
+                      <option value="NEXT_90">Next 90 Days</option>
+                      <option value="NEXT_365">Next 12 Months</option>
+                      <option value="OVERDUE">Overdue</option>
+                    </select>
+                  </div>
+
+                  <div className="col-span-2 sm:col-span-1">
+                    <label htmlFor="queue-expiry-custom-date" className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+                      Custom Date
+                    </label>
+                    <input
+                      id="queue-expiry-custom-date"
+                      type="date"
+                      value={customQueueDateValue}
+                      onChange={e => handleQueueCustomDateChange(e.target.value)}
+                      aria-label="Filter expiry by customized date"
+                      title="Pick an exact customized expiry date"
+                      className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto max-h-80 overflow-y-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b sticky top-0">
                     <tr>
                       <th className="px-4 py-2.5">SACCO A/C</th>
                       <th className="px-4 py-2.5">Member Name</th>
@@ -665,7 +867,7 @@ export const TurihamweView: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {expiryRecords.slice(0, 5).map(e => (
+                    {visibleQueueExpiries.map(e => (
                       <tr key={e.planId} className="hover:bg-slate-50">
                         <td className="px-4 py-2.5 font-mono font-bold text-blue-900">{e.saccoAccountNumber}</td>
                         <td className="px-4 py-2.5 font-semibold text-slate-900">{e.memberName}</td>
@@ -676,11 +878,17 @@ export const TurihamweView: React.FC = () => {
                               ? 'bg-red-100 text-red-800'
                               : e.daysUntilExpiry <= 7
                               ? 'bg-orange-100 text-orange-800'
-                              : 'bg-amber-100 text-amber-800'
+                              : e.daysUntilExpiry <= 30
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
                           }`}>
                             {e.daysUntilExpiry < 0
                               ? `${Math.abs(e.daysUntilExpiry)}d Overdue`
-                              : `${e.daysUntilExpiry}d remaining`}
+                              : e.daysUntilExpiry === 0
+                              ? 'Expires Today'
+                              : e.daysUntilExpiry <= 30
+                              ? `${e.daysUntilExpiry}d remaining`
+                              : `${e.daysUntilExpiry}d ahead`}
                           </span>
                         </td>
                         <td className="px-4 py-2.5 text-right">
@@ -708,9 +916,38 @@ export const TurihamweView: React.FC = () => {
                         </td>
                       </tr>
                     )}
+                    {expiryRecords.length > 0 && filteredQueueExpiries.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-6 text-center text-slate-500 space-y-2">
+                          <div>No expiries match the selected Day / Month / Year filter.</div>
+                          <button
+                            type="button"
+                            onClick={clearQueueExpiryFilters}
+                            className="text-xs font-bold text-blue-700 hover:underline"
+                          >
+                            Reset Date Filter
+                          </button>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
+
+              {!hasQueueExpiryFilter && filteredQueueExpiries.length > 5 && (
+                <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-600">
+                  <span>
+                    Showing {visibleQueueExpiries.length} of {filteredQueueExpiries.length} expiries
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setQueueShowAll(prev => !prev)}
+                    className="font-bold text-blue-700 hover:underline"
+                  >
+                    {queueShowAll ? 'Show top 5' : `Show all (${filteredQueueExpiries.length})`}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1200,7 +1437,7 @@ export const TurihamweView: React.FC = () => {
                 ))}
                 {filteredPlans.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-6 py-8 text-center text-slate-400">
+                    <td colSpan={9} className="px-6 py-8 text-center text-slate-400">
                       No Turihamwe plans found.
                     </td>
                   </tr>
@@ -1228,11 +1465,12 @@ export const TurihamweView: React.FC = () => {
           </div>
 
           <div className="p-4 bg-slate-50 rounded-lg border text-xs text-slate-700 space-y-2">
-            <div className="font-bold text-slate-900">Auditable Beneficiary Structure Rules:</div>
+            <div className="font-bold text-slate-900">Auditable Beneficiary Policy Rules:</div>
             <ul className="list-disc pl-5 space-y-1 text-slate-600">
-              <li>Beneficiaries are strictly tied to the member&apos;s SACCO account number and plan ID.</li>
-              <li>Percentage allocations must not exceed 100% aggregate per member plan.</li>
-              <li>Every addition, modification, or removal records user, timestamp, branch, and justification in the immutable audit trail.</li>
+              <li><strong>No Maximum Beneficiary Limit:</strong> Members may register any number of eligible beneficiaries under their Turihamwe plan (previous 13-beneficiary limit permanently removed).</li>
+              <li><strong>Approved Categories Only:</strong> Only <strong>Biological Child</strong>, <strong>Biological Parent</strong>, and <strong>Spouse</strong> are permitted. Caretakers, aunts, uncles, cousins, siblings, grandparents, guardians, and other relatives are disallowed.</li>
+              <li><strong>Age & Eligibility:</strong> Biological children under 18 years are eligible under an adult member&apos;s plan; maximum beneficiary enrollment age is 70 years.</li>
+              <li><strong>Status & Record Preservation:</strong> Marking a beneficiary as DECEASED preserves historical records while keeping the member&apos;s Turihamwe plan ACTIVE.</li>
             </ul>
           </div>
         </div>

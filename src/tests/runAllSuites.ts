@@ -3,7 +3,7 @@
  * 
  * Runs all validation and verification suites across all development phases:
  * - Phase 2: Member Management & SACCO Core (13 Scenarios)
- * - Phase 6: Reports, Africa's Talking SMS & In-System Alert Center (10 Scenarios)
+ * - Phase 6: Reports, Pandora Networks SMS & In-System Alert Center (10 Scenarios)
  * - Phase 7: Security, User Admin, Central Backup & Audit Control (18 Scenarios)
  * - Phase 8: Master Integration, Conflict Handling & QA Readiness (16 Scenarios)
  * 
@@ -24,10 +24,15 @@ import { MasterProductionDeploymentTestRunner } from './masterProductionDeployme
 import { TurihamweAgeValidationAuditRunner } from './turihamweAgeValidationAudit.test';
 import { ExistingMemberAgeVerificationTestRunner } from './existingMemberAgeVerification.test';
 import { TurihamweSmsCleanupAuditRunner } from './turihamweSmsCleanupAudit.test';
+import { TurihamweBeneficiaryRulesAuditRunner } from './turihamweBeneficiaryRulesAudit.test';
+import { DataProtectionNoFakeGenerationTestRunner } from './dataProtectionNoFakeGeneration.test';
+import { ensureIsolatedTestAdmin } from './testAdminHelper';
 import { serverStore } from '../server/storage/serverStore';
 
 async function main() {
+  process.env.TUR_TEST_ENV = 'true';
   process.env.SEED_TEST_DATA = 'true';
+  await ensureIsolatedTestAdmin();
   console.log('\n================================================================');
   console.log('   TURIHAMWE MANAGEMENT SYSTEM — COMPREHENSIVE TEST SUITE');
   console.log('   Organization: Nyamuyanja SACCO Ltd, Uganda');
@@ -297,6 +302,45 @@ async function main() {
     }
   } catch (err: any) {
     console.error('Turihamwe SMS cleanup audit suite execution error:', err.message);
+    hasAnyFailure = true;
+  }
+
+  // 15. Turihamwe Beneficiary Rules & Management Audit Suite (16 Scenarios)
+  try {
+    const beneficiaryResults = await TurihamweBeneficiaryRulesAuditRunner.runAllTests();
+    for (const r of beneficiaryResults) {
+      grandTotal++;
+      if (r.passed) {
+        grandPassed++;
+        console.log(`  ✓ Test ${r.id.toString().padStart(2, '0')}: ${r.name}`);
+      } else {
+        grandFailed++;
+        hasAnyFailure = true;
+        console.log(`  ✗ Test ${r.id.toString().padStart(2, '0')}: ${r.name} — ${r.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error('Beneficiary rules audit suite execution error:', err.message);
+    hasAnyFailure = true;
+  }
+
+  // 16. Data Protection & Zero Fake Account Generation Audit Suite (12 Scenarios)
+  console.log('\n>>> [SUITE 16/16] DATA PROTECTION & ZERO FAKE ACCOUNT GENERATION AUDIT');
+  try {
+    const dpResults = await DataProtectionNoFakeGenerationTestRunner.runAllTests();
+    for (const r of dpResults) {
+      grandTotal++;
+      if (r.passed) {
+        grandPassed++;
+        console.log(`  ✓ Test ${r.id.toString().padStart(2, '0')}: ${r.name}`);
+      } else {
+        grandFailed++;
+        hasAnyFailure = true;
+        console.log(`  ✗ Test ${r.id.toString().padStart(2, '0')}: ${r.name} — ${r.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error('Data protection & zero fake generation audit suite execution error:', err.message);
     hasAnyFailure = true;
   }
 

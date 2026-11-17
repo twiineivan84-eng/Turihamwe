@@ -12,9 +12,9 @@ The Turihamwe Management System employs an institutional, offline-first hybrid a
 ```
 [ Central Cloud / Server ]
 ├── Express.js API & Vite Single Page App (Port 3000)
-├── Central PostgreSQL 16 Database (Isolated from SACCO Core Banking)
-├── Africa's Talking Uganda Live SMS Gateway
-├── Encrypted Snapshot Backup Archive Storage (/app/data/backups)
+├── Central Transactional Store & Offline Cache (TUR_PERSISTENT_DATA_DIR)
+├── Pandora Networks Uganda Live SMS Gateway
+├── Snapshot Backup Archive Storage (/app/data/backups)
 └── Claim Evidence File Store (/app/data/uploads)
          ▲
          │ HTTPS / TLS (Bidirectional Sync API)
@@ -54,7 +54,7 @@ The Turihamwe Management System employs an institutional, offline-first hybrid a
 2. **Configure production environment variables**:
    ```bash
    cp .env.example .env
-   # Edit .env with your production database credentials, 32+ char JWT secret, and Africa's Talking live key
+   # Edit .env with your 32+ char JWT_SECRET, TUR_PERSISTENT_DATA_DIR, and Pandora Networks SMS credentials
    chmod 600 .env
    ```
 

@@ -132,16 +132,22 @@ CREATE INDEX IF NOT EXISTS idx_plans_branch ON turihamwe_plans(branch_id);
 CREATE INDEX IF NOT EXISTS idx_plans_status ON turihamwe_plans(status);
 CREATE INDEX IF NOT EXISTS idx_plans_expiry ON turihamwe_plans(expiry_date);
 
--- 8. Beneficiaries
+-- 8. Beneficiaries (Unlimited per plan; Approved categories: Biological Child, Biological Parent, Spouse)
 CREATE TABLE IF NOT EXISTS beneficiaries (
     id VARCHAR(50) PRIMARY KEY,
     plan_id VARCHAR(50) NOT NULL REFERENCES turihamwe_plans(id) ON DELETE CASCADE ON UPDATE CASCADE,
     full_name VARCHAR(150) NOT NULL,
     relationship VARCHAR(50) NOT NULL,
     date_of_birth VARCHAR(20),
+    national_id_number VARCHAR(32),
     phone_number VARCHAR(30),
     allocation_percentage NUMERIC(5, 2) DEFAULT 0 NOT NULL,
     is_primary BOOLEAN DEFAULT FALSE NOT NULL,
+    status VARCHAR(20) DEFAULT 'ALIVE' NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE NOT NULL,
+    is_deceased BOOLEAN DEFAULT FALSE NOT NULL,
+    deceased_date VARCHAR(50),
+    deceased_reason TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );

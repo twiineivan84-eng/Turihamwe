@@ -15,8 +15,8 @@
 │   Internal Core Banking Server  │         │   (Independent Cloud Server)    │
 │  (Isolated LAN, No Direct Turihamwe) │         │   - Node.js Express Backend     │
 │  - Member Savings & Share Accounts │         │   - React 19 Frontend SPA       │
-│  - Loan Portfolios & Ledger     │         │   - Central PostgreSQL DB       │
-│  - Daily Teller Clearing        │         │   - Africa's Talking SMS Gateway│
+│  - Loan Portfolios & Ledger     │         │   - Persistent Journal Store    │
+│  - Daily Teller Clearing        │         │   - Pandora Networks SMS Gateway│
 └─────────────────────────────────┘         └─────────────────────────────────┘
                                                              ▲
                                                              │ HTTPS (TLS 1.3)
@@ -110,11 +110,17 @@ PGDATABASE="turihamwe_db"
 PGUSER="turihamwe_user"
 PGPASSWORD="Your_Production_Password"
 
-# Africa's Talking Uganda Live SMS API Credentials
-SMS_ENVIRONMENT="PRODUCTION"
-AT_USERNAME="nyamuyanjasacco"
-AT_API_KEY="atsk_your_live_africastalking_production_key_here"
-AT_SENDER_ID="TURIHAMWE" # UCC / Africa's Talking approved alphanumeric sender ID
+# Persistent Storage Directory (MUST be mounted to durable disk/volume in containers)
+TUR_PERSISTENT_DATA_DIR="/var/turihamwe/data"
+
+# Pandora Networks Uganda Live SMS API Credentials (Exclusive Provider)
+SMS_PROVIDER="PANDORA"
+SMS_ENABLED="true"
+PANDORA_SMS_API_URL="https://www.sms.thepandoranetworks.com/API/send_sms/"
+PANDORA_SMS_BALANCE_URL="https://www.sms.thepandoranetworks.com/API/balance_inquiry.php"
+PANDORA_SMS_PHONE_NUMBER="2567XXXXXXXX"
+PANDORA_SMS_PASSWORD="Replace_With_Pandora_Account_Password"
+PANDORA_SMS_SENDER_ID="NYAMUYANJA"
 
 # Automated Backup Directory
 BACKUP_STORAGE_DIR="/var/turihamwe/backups"
@@ -192,10 +198,10 @@ server {
 
 ---
 
-## 7. Africa's Talking Uganda Verification Checklist
+## 7. Pandora Networks Uganda Verification Checklist
 
-1. [ ] Live Africa's Talking Uganda account funded in UGX.
-2. [ ] Approved alphanumeric Sender ID (`TURIHAMWE`) registered with Uganda Communications Commission (UCC).
-3. [ ] All recipient phone numbers converted to E.164 (`+256XXXXXXXXX`).
+1. [ ] Live Pandora Networks Uganda account funded in UGX (`PANDORA_SMS_PHONE_NUMBER` & `PANDORA_SMS_PASSWORD` configured).
+2. [ ] Approved alphanumeric Sender ID (`NYAMUYANJA`) registered with Uganda Communications Commission (UCC).
+3. [ ] All recipient phone numbers converted to Ugandan E.164 (`+256XXXXXXXXX` / `256XXXXXXXXX`).
 4. [ ] Inbound webhook configured for delivery reports (`/api/sms/delivery-report`).
 5. [ ] Offline queue retries capped at 3 attempts with exponential backoff.

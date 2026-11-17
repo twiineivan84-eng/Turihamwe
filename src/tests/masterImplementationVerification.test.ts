@@ -16,6 +16,7 @@ import { SmsService, APPROVED_EXPIRY_SMS_TEXT } from '../server/services/smsServ
 import { PandoraAdapter } from '../server/services/pandoraAdapter';
 import { PandoraSmsService } from '../server/services/pandoraSmsService';
 import { SeedService } from '../server/services/seedService';
+import { ensureIsolatedTestAdmin } from './testAdminHelper';
 import { getUgandaDateString } from '../utils/timezone';
 import { config } from '../server/config';
 import { SaccoMember, Beneficiary, TurihamwePlan, User } from '../types';
@@ -42,6 +43,7 @@ export async function runMasterVerificationSuite(): Promise<{
   console.log('================================================================\n');
 
   await serverStore.initialize();
+  await ensureIsolatedTestAdmin();
   await SeedService.seedInitialData();
 
   const originalFetch = globalThis.fetch;
@@ -121,8 +123,10 @@ export async function runMasterVerificationSuite(): Promise<{
     };
     serverStore.addPlan(testPlan);
 
-    // Run scheduler evaluation (simulating automated 15s background worker tick)
-    const evalRes = await SmsService.evaluateExpiryNotificationEvents();
+    // Run scheduler evaluation (simulating automated 15s background worker tick at 09:30 EAT)
+    const evalRes = SmsService.evaluateExpiryNotificationEvents({
+      simulatedDate: `${todayUganda}T09:30:00+03:00`,
+    });
     const queuedMessages = serverStore.getSmsMessages().filter(
       m => m.planId === testPlan.id && m.eventReferenceKey === `PLAN_EXPIRY_AUTO::${testPlan.id}::${todayUganda}`
     );
@@ -143,16 +147,16 @@ export async function runMasterVerificationSuite(): Promise<{
 
   // Test A3: Premature Expiry Suppression for Future Expiries
   try {
-    const today = new Date();
-    const futureDate = new Date(today.getTime() + 15 * 86400000).toISOString().split('T')[0];
+    const todayUganda = getUgandaDateString(new Date());
+    const futureDate = getUgandaDateString(new Date(Date.now() + 15 * 86400000));
     const futurePlan: TurihamwePlan = {
       id: `plan-future-${Date.now()}`,
       saccoAccountNumber: 'NYA-001234',
       memberName: 'Future Member',
       planCode: 'STANDARD',
       status: 'ACTIVE',
-      enrolmentDate: today.toISOString().split('T')[0],
-      effectiveStartDate: today.toISOString().split('T')[0],
+      enrolmentDate: todayUganda,
+      effectiveStartDate: todayUganda,
       currentExpiryDate: futureDate,
       totalContributionsAmount: 30000,
       registeredBranchId: 'br-nya',
@@ -165,7 +169,9 @@ export async function runMasterVerificationSuite(): Promise<{
     serverStore.addPlan(futurePlan);
 
     const queuedBefore = serverStore.getSmsMessages().filter(m => m.planId === futurePlan.id).length;
-    await SmsService.evaluateExpiryNotificationEvents();
+    SmsService.evaluateExpiryNotificationEvents({
+      simulatedDate: `${todayUganda}T09:30:00+03:00`,
+    });
     const queuedAfter = serverStore.getSmsMessages().filter(m => m.planId === futurePlan.id).length;
 
     const passed = queuedBefore === 0 && queuedAfter === 0;
@@ -185,7 +191,8 @@ export async function runMasterVerificationSuite(): Promise<{
   // Test A4: Recovery of Missed Overdue Reminders After System Downtime
   try {
     // Plan expired 2 days ago during offline/downtime
-    const pastDate = new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0];
+    const todayUganda = getUgandaDateString(new Date());
+    const pastDate = getUgandaDateString(new Date(Date.now() - 2 * 86400000));
     const missedAcc = `NYA-MISSED-${Date.now()}`;
     const missedPlan: TurihamwePlan = {
       id: `plan-missed-${Date.now()}`,
@@ -228,8 +235,10 @@ export async function runMasterVerificationSuite(): Promise<{
     };
     serverStore.addMember(memberRec);
 
-    // Evaluate
-    await SmsService.evaluateExpiryNotificationEvents();
+    // Evaluate (at post-09:00 EAT release gate)
+    SmsService.evaluateExpiryNotificationEvents({
+      simulatedDate: `${todayUganda}T09:30:00+03:00`,
+    });
     const missedQueued = serverStore.getSmsMessages().filter(
       m => m.planId === missedPlan.id && m.eventReferenceKey === `PLAN_EXPIRY_AUTO::${missedPlan.id}::${pastDate}`
     );
@@ -294,9 +303,9 @@ export async function runMasterVerificationSuite(): Promise<{
     serverStore.addMember(dedupMember);
 
     // Run scheduler 3 consecutive cycles
-    await SmsService.evaluateExpiryNotificationEvents();
-    await SmsService.evaluateExpiryNotificationEvents();
-    await SmsService.evaluateExpiryNotificationEvents();
+    SmsService.evaluateExpiryNotificationEvents({ simulatedDate: `${todayUganda}T09:30:00+03:00` });
+    SmsService.evaluateExpiryNotificationEvents({ simulatedDate: `${todayUganda}T10:00:00+03:00` });
+    SmsService.evaluateExpiryNotificationEvents({ simulatedDate: `${todayUganda}T10:30:00+03:00` });
 
     const queuedCount = serverStore.getSmsMessages().filter(
       m => m.planId === dedupPlan.id && m.eventReferenceKey === `PLAN_EXPIRY_AUTO::${dedupPlan.id}::${todayUganda}`
@@ -1167,67 +1176,58 @@ export async function runMasterVerificationSuite(): Promise<{
     results.push({ group: 'PART_B', testNumber: 25, name: 'Root Admin ivan Verification', passed: false, message: err.message });
   }
 
-  // Test 26: Dummy account 'itadm' Confirmed Deleted and Non-Resurrectable
+  // Test 26: Dummy account 'itadm' and legacy demo accounts NEVER seeded or resurrected
   try {
-    // 1. Check active user query
-    const itadmActive = serverStore.getUserByUsername('itadm');
-    // 2. Check tombstone existence
-    const isTombstoned = serverStore.isUserDeleted('itadm') || serverStore.isUserDeleted('usr-it-01');
+    const legacyDemoUsernames = ['itadm', 'gm001', 'bmnya', 'csh01', 'acct1', 'audit'];
+    const beforeSeedFound = legacyDemoUsernames.filter(u => Boolean(serverStore.getUserByUsername(u)));
 
-    // 3. Re-run seedInitialData to test against resurrection
     await SeedService.seedInitialData();
-    const itadmAfterSeed = serverStore.getUserByUsername('itadm');
+    const afterSeedFound = legacyDemoUsernames.filter(u => Boolean(serverStore.getUserByUsername(u)));
 
-    const passed = itadmActive === undefined && itadmAfterSeed === undefined && isTombstoned;
+    const passed = beforeSeedFound.length === 0 && afterSeedFound.length === 0;
     results.push({
       group: 'PART_B',
       testNumber: 26,
-      name: "Dummy Account 'itadm' Confirmed Purged, Tombstoned and Non-Resurrectable",
+      name: "Legacy Demo Accounts ('itadm', 'gm001', etc.) Confirmed Absent and Never Auto-Seeded",
       passed,
       message: passed
-        ? "Dummy account 'itadm' is completely purged and prevented from resurrection across startup seeding"
-        : "Dummy account 'itadm' still exists or was resurrected by seeding",
+        ? 'Verified: Zero legacy demo accounts present before or after SeedService.seedInitialData()'
+        : `Unexpected demo accounts found: ${afterSeedFound.join(', ')}`,
     });
   } catch (err: any) {
-    results.push({ group: 'PART_B', testNumber: 26, name: 'Dummy Account itadm Purge', passed: false, message: err.message });
+    results.push({ group: 'PART_B', testNumber: 26, name: 'Demo Account Non-Generation Check', passed: false, message: err.message });
   }
 
-  // Test 27: Production Cleanup Policy - Exclusively Ivan Preserved & Demo Accounts Purged
+  // Test 27: Root Administrator 'ivan' Protection & Absence of Auto-Protected Demo Staff
   try {
-    const isDeploymentReady = serverStore.getSystemSettings()['deployment.ready'] === 'true';
-    const demoUsernames = ['gm001', 'bmnya', 'csh01', 'acct1', 'audit'];
-    const users = serverStore.getUsers();
-    const foundUsernames = users.map(u => u.username.toLowerCase());
-    
-    let passed = false;
-    let message = '';
-    
-    if (isDeploymentReady) {
-      // In production readiness mode, only ivan is present; demo accounts are purged
-      const hasIvan = foundUsernames.includes('ivan');
-      const hasNoDemoUsers = demoUsernames.every(u => !foundUsernames.includes(u));
-      const allDemoTombstoned = demoUsernames.every(u => serverStore.isUserDeleted(u));
-      passed = hasIvan && hasNoDemoUsers && allDemoTombstoned;
-      message = passed
-        ? "Production cleanup policy strictly verified: exclusively 'ivan' remains active; all demo accounts (gm001, bmnya, csh01, acct1, audit) are purged and tombstoned"
-        : `Production cleanup check failed: found usernames [${foundUsernames.join(', ')}], deleted tombstone check: ${allDemoTombstoned}`;
-    } else {
-      const missing = demoUsernames.filter(u => !foundUsernames.includes(u));
-      passed = missing.length === 0;
-      message = passed
-        ? `All operational staff accounts (${demoUsernames.join(', ')}) intact`
-        : `Missing staff accounts: ${missing.join(', ')}`;
-    }
+    const ivanUser = serverStore.getUserByUsername('ivan');
+    const ivanDeleteAttempt = ivanUser ? serverStore.deleteUser(ivanUser.id) : { success: true };
+    const ivanStillActive = Boolean(serverStore.getUserByUsername('ivan'));
+    const noIvanTombstone = !serverStore.isUserDeleted('ivan');
+
+    const demoUsernames = ['gm001', 'bmnya', 'csh01', 'acct1', 'audit', 'itadm'];
+    const demoAutoCreated = demoUsernames.filter(u => Boolean(serverStore.getUserByUsername(u)));
+
+    const passed =
+      Boolean(ivanUser) &&
+      !ivanDeleteAttempt.success &&
+      ivanStillActive &&
+      noIvanTombstone &&
+      demoAutoCreated.length === 0;
+
+    const message = passed
+      ? "Root admin 'ivan' is active and protected from deletion/tombstoning; zero demo staff accounts auto-created"
+      : `Protection check failed: ivanActive=${ivanStillActive}, delRejected=${!ivanDeleteAttempt.success}, demoFound=${demoAutoCreated.join(', ')}`;
 
     results.push({
       group: 'PART_B',
       testNumber: 27,
-      name: 'Production Account Exclusivity: Only Genuine Ivan Preserved, Demo Accounts Purged & Tombstoned',
+      name: 'Root Admin Protection & Zero Auto-Generated Demo Staff Accounts',
       passed,
       message,
     });
   } catch (err: any) {
-    results.push({ group: 'PART_B', testNumber: 27, name: 'Production Account Exclusivity', passed: false, message: err.message });
+    results.push({ group: 'PART_B', testNumber: 27, name: 'Root Admin Protection & Zero Demo Staff', passed: false, message: err.message });
   }
 
   // Restore everything
